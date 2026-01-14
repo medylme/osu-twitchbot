@@ -2,7 +2,7 @@
   <img src="assets/icon.png" alt="osu-twitchbot icon" width="128">
 </p>
 
-# osu-twitchbot
+# osu! twitchbot
 
 A lightweight desktop app that reads beatmap information from osu! and can respond to Twitch chat commands. Supports both Stable and Lazer.
 
