@@ -235,14 +235,12 @@ impl<'a> StableReader<'a> {
             return None;
         }
 
-        // navigate pointer chain: [[[Ruleset + 0x68] + 0x38] + 0x1C]
-
+        // we first find the ruleset pointer
         let ruleset_ptr_addr = self.ruleset_addr + self.offsets.ruleset.ptr_offset;
         let ruleset_ptr = self.process.read_ptr32(ruleset_ptr_addr).ok()?;
         if ruleset_ptr == 0 {
             return None;
         }
-
         let ruleset_base = self
             .process
             .read_ptr32(ruleset_ptr + self.offsets.ruleset.ptr_deref_offset)
@@ -251,7 +249,7 @@ impl<'a> StableReader<'a> {
             return None;
         }
 
-        // [Ruleset + 0x68] -> PlayContainer
+        // then traverse to the PlayContainer
         let play_container = self
             .process
             .read_ptr32(ruleset_base + self.offsets.ruleset.play_container)
@@ -260,32 +258,32 @@ impl<'a> StableReader<'a> {
             return None;
         }
 
-        // [PlayContainer + 0x38]
-        let mods_base = self
+        // then to the score
+        let score = self
             .process
             .read_ptr32(play_container + self.offsets.ruleset.mods_base)
             .ok()?;
-        if mods_base == 0 {
+        if score == 0 {
             return None;
         }
 
-        // [ModsBase + 0x1C] -> pointer to XOR values
-        let mods_ptr = self
+        // and then we can find the mods
+        let mods_xor_base = self
             .process
-            .read_ptr32(mods_base + self.offsets.ruleset.mods_ptr)
+            .read_ptr32(score + self.offsets.ruleset.mods_ptr)
             .ok()?;
-        if mods_ptr == 0 {
+        if mods_xor_base == 0 {
             return None;
         }
 
-        // read XOR-encoded mods values and decode
+        // we read two values and XOR them to decode
         let xor1 = self
             .process
-            .read_i32(mods_ptr + self.offsets.ruleset.mods_xor1)
+            .read_i32(mods_xor_base + self.offsets.ruleset.mods_xor1)
             .ok()?;
         let xor2 = self
             .process
-            .read_i32(mods_ptr + self.offsets.ruleset.mods_xor2)
+            .read_i32(mods_xor_base + self.offsets.ruleset.mods_xor2)
             .ok()?;
 
         let mods_value = xor1 ^ xor2;
