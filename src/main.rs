@@ -156,10 +156,6 @@ fn osu_worker() -> impl iced::futures::Stream<Item = MemoryEvent> {
                 time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
             };
 
-            if let Some(ref version) = process.version {
-                log_info!("osu", "Detected osu! lazer version: {}", version);
-            }
-
             let result = match process.client {
                 OsuClient::Lazer => {
                     run_lazer_reader(
@@ -328,4 +324,3 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
         }
     })
 }
-
