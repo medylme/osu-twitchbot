@@ -8,11 +8,11 @@ use iced::widget::{
 };
 use iced::{Element, Fill, Font, color};
 
-use crate::credentials::CredentialStore;
 use super::components::{
     BOLD_FONT, code_block_container, primary_button, primary_text_input, tab_button,
     tab_button_active,
 };
+use crate::credentials::CredentialStore;
 use crate::logging::{LogEntry, LogLevel};
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
 use crate::twitch::{
@@ -46,7 +46,7 @@ pub enum Message {
     OsuEvent(MemoryEvent),
     TwitchEvent(TwitchEvent),
     LogEvent(LogEntry),
-    BeatmapLinkClicked(String),
+    LinkClicked(String),
 }
 
 const MAX_LOG_ENTRIES: usize = 500;
@@ -232,7 +232,6 @@ impl State {
         };
 
         let version_text = text(version_string).size(12).color(info_color);
-
         let creator_text = rich_text![
             span::<String, Font>("Created by ").color(info_color),
             span::<String, Font>("me").color(dim_color),
@@ -244,9 +243,10 @@ impl State {
             span::<String, Font>("GitHub")
                 .color(link_color)
                 .underline(true)
-                .link(github_url.to_string())
+                .link(github_url)
         ]
-        .size(11);
+        .size(11)
+        .on_link_click(Message::LinkClicked);
 
         let info_section = column![version_text, creator_text]
             .spacing(4)
@@ -350,7 +350,7 @@ impl State {
                             .link(beatmap_link.clone())
                     ]
                     .size(11)
-                    .on_link_click(Message::BeatmapLinkClicked)
+                    .on_link_click(Message::LinkClicked)
                 ]
                 .spacing(10);
 
@@ -453,8 +453,19 @@ impl State {
     }
 
     fn view_footer(&self) -> Element<'_, Message> {
-        let osu_status = text(format!("osu! | {}", &self.osu_status)).size(12);
-        let twitch_status = text(format!("Twitch | {}", &self.twitch_status)).size(12);
+        let dim_color = color!(0x666666);
+        let osu_status = rich_text![
+            span::<String, Font>("osu!"),
+            span::<String, Font>(" | ").color(dim_color),
+            span::<String, Font>(self.osu_status.to_string()),
+        ]
+        .size(12);
+        let twitch_status = rich_text![
+            span::<String, Font>("Twitch"),
+            span::<String, Font>(" | ").color(dim_color),
+            span::<String, Font>(self.twitch_status.to_string()),
+        ]
+        .size(12);
 
         container(column![osu_status, twitch_status])
             .padding([5, 10])
@@ -615,7 +626,7 @@ impl State {
                     self.log_entries.remove(0);
                 }
             }
-            Message::BeatmapLinkClicked(url) => {
+            Message::LinkClicked(url) => {
                 let _ = open::that(url);
             }
         }
