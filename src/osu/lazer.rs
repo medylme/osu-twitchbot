@@ -468,7 +468,7 @@ impl<'a> LazerReader<'a> {
 
     pub fn read_beatmap(&mut self) -> Result<BeatmapData, MemoryError> {
         let unknown_data = BeatmapData {
-            id: -1,
+            id: 0,
             artist: "?".to_string(),
             title: "?".to_string(),
             difficulty_name: "?".to_string(),
@@ -548,7 +548,7 @@ impl<'a> LazerReader<'a> {
         let id = self
             .process
             .read_i32(beatmap_info + self.offsets.beatmap_info.online_id)
-            .unwrap_or(-1);
+            .unwrap_or(0);
 
         let status_int = self
             .process

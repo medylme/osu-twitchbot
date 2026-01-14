@@ -27,7 +27,7 @@ pub fn parse_beatmap_placeholders(beatmap: &crate::osu::core::BeatmapData, forma
         .map(|m| format!("+{}", m))
         .unwrap_or_default();
 
-    let link = if beatmap.id == -1 {
+    let link = if beatmap.id <= 0 {
         String::new()
     } else {
         format!("https://osu.ppy.sh/b/{}", beatmap.id)
