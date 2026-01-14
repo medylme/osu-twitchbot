@@ -281,8 +281,7 @@ impl<'a> LazerReader<'a> {
             }
         };
 
-        log_debug!("memory-lazer", "Reading pointer chain...");
-
+        // from scaling container draw size pattern, we read a static reference to ExternalLinkOpener
         let external_link_opener_addr = (scaling_container_target_draw_size as isize
             + offsets.base.external_link_opener) as usize;
         log_debug!(
@@ -290,7 +289,6 @@ impl<'a> LazerReader<'a> {
             "ExternalLinkOpener address: 0x{:X}",
             external_link_opener_addr
         );
-
         let external_link_opener = match process.read_ptr(external_link_opener_addr) {
             Ok(ptr) => {
                 if ptr == 0 {
@@ -310,9 +308,9 @@ impl<'a> LazerReader<'a> {
             }
         };
 
+        // we then traverse to the API object
         let api_ptr_addr = external_link_opener + offsets.external_link_opener.api;
         log_debug!("memory-lazer", "API pointer address: 0x{:X}", api_ptr_addr);
-
         let api = match process.read_ptr(api_ptr_addr) {
             Ok(ptr) => {
                 if ptr == 0 {
@@ -328,13 +326,13 @@ impl<'a> LazerReader<'a> {
             }
         };
 
+        // and finally find the GameBase
         let game_base_addr = api + offsets.api_access.game;
         log_debug!(
             "memory-lazer",
             "Game base address location: 0x{:X}",
             game_base_addr
         );
-
         let game_base = match process.read_ptr(game_base_addr) {
             Ok(ptr) => {
                 if ptr == 0 {
