@@ -91,7 +91,7 @@ Check out the Justfile for all other available commands.
 
 ## Special Thanks
 
-💙 to [gosumemory](https://github.com/l3lackShark/gosumemory) (stable) and [tosu](https://github.com/tosuapp/tosu) (Lazer) for memory reading strategy and initial offsets.
+💙 to [ProcessMemoryDataFinder](https://github.com/Piotrekol/ProcessMemoryDataFinder)/[gosumemory](https://github.com/l3lackShark/gosumemory) (stable) and [tosu](https://github.com/tosuapp/tosu) (Lazer) for memory reading strategy and initial offsets.
 
 ## License
 

@@ -1,7 +1,7 @@
 {
   "patterns": {
     "base": "F8 01 74 04 83 65",
-    "menu_mods": "C8 FF ?? ?? ?? ?? ?? 81 0D ?? ?? ?? ?? 00 08 00 00"
+    "ruleset": "C7 86 48 01 00 00 01 00 00 00 A1"
   },
   "status": {
     "base_offset": -60
@@ -26,7 +26,13 @@
     "folder": 116,
     "file": 148
   },
-  "menu_mods": {
-    "mods": 9
+  "ruleset": {
+    "ptr_offset": 11,
+    "ptr_deref_offset": 4,
+    "play_container": 104,
+    "mods_base": 56,
+    "mods_ptr": 28,
+    "mods_xor1": 8,
+    "mods_xor2": 12
   }
 }

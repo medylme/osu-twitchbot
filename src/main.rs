@@ -71,9 +71,11 @@ fn get_osu_event_forward() -> &'static OsuEventForwardType {
 }
 
 fn main() -> iced::Result {
-    updater::install::cleanup_old_binary();
-
-    let _ = updater::splash::run_startup_update_check();
+    #[cfg(not(debug_assertions))]
+    {
+        updater::install::cleanup_old_binary();
+        let _ = updater::splash::run_startup_update_check();
+    }
 
     log_info!("main", "Starting osu-twitchbot");
 
@@ -155,10 +157,6 @@ fn osu_worker() -> impl iced::futures::Stream<Item = MemoryEvent> {
                 }
                 time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
             };
-
-            if let Some(ref version) = process.version {
-                log_info!("osu", "Detected osu! lazer version: {}", version);
-            }
 
             let result = match process.client {
                 OsuClient::Lazer => {
@@ -328,4 +326,3 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
         }
     })
 }
-

@@ -55,7 +55,8 @@ pub async fn run_stable_reader(
 
                 match result {
                     Ok(Ok(beatmap)) => {
-                        let mods_changed = current_beatmap.as_ref().map(|b| &b.mods) != Some(&beatmap.mods);
+                        let mods_changed =
+                            current_beatmap.as_ref().map(|b| &b.mods) != Some(&beatmap.mods);
                         let beatmap_changed = last_beatmap_id != Some(beatmap.id);
 
                         if beatmap_changed || mods_changed {
@@ -106,14 +107,14 @@ struct Offsets {
     patterns: Patterns,
     base: BaseOffsets,
     beatmap: BeatmapOffsets,
-    menu_mods: MenuModsOffsets,
+    ruleset: RulesetOffsets,
     status: StatusOffsets,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct Patterns {
     base: String,
-    menu_mods: String,
+    ruleset: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -137,8 +138,14 @@ struct BeatmapOffsets {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct MenuModsOffsets {
-    mods: usize,
+struct RulesetOffsets {
+    ptr_offset: usize,
+    ptr_deref_offset: usize,
+    play_container: usize,
+    mods_base: usize,
+    mods_ptr: usize,
+    mods_xor1: usize,
+    mods_xor2: usize,
 }
 
 #[derive(Clone)]
@@ -146,7 +153,7 @@ pub struct StableReader<'a> {
     offsets: Offsets,
     process: &'a ProcessMemory,
     base_addr: usize,
-    menu_mods_addr: usize,
+    ruleset_addr: usize,
 }
 
 impl<'a> StableReader<'a> {
@@ -182,32 +189,32 @@ impl<'a> StableReader<'a> {
             }
         };
 
-        log_debug!("memory-stable", "Scanning for menu mods pattern...");
+        log_debug!("memory-stable", "Scanning for ruleset pattern...");
 
-        let (mods_pattern, mods_mask) = parse_pattern(&offsets.patterns.menu_mods);
-        let menu_mods_addr = match process.pattern_scan(&mods_pattern, &mods_mask) {
+        let (ruleset_pattern, ruleset_mask) = parse_pattern(&offsets.patterns.ruleset);
+        let ruleset_addr = match process.pattern_scan(&ruleset_pattern, &ruleset_mask) {
             Ok(addr) => {
-                log_debug!("memory-stable", "Found menu mods pattern at: 0x{:X}", addr);
+                log_debug!("memory-stable", "Found ruleset pattern at: 0x{:X}", addr);
                 addr
             }
             Err(e) => {
-                log_error!("memory-stable", "Failed to find menu mods pattern: {}", e);
+                log_error!("memory-stable", "Failed to find ruleset pattern: {}", e);
                 return Err(Box::new(e));
             }
         };
 
         log_debug!(
             "memory-stable",
-            "Found base at: 0x{:X}, menu_mods at: 0x{:X}",
+            "Found base at: 0x{:X}, ruleset at: 0x{:X}",
             base_addr,
-            menu_mods_addr
+            ruleset_addr
         );
 
         Ok(Self {
             offsets,
             process: Box::leak(Box::new(process)),
             base_addr,
-            menu_mods_addr,
+            ruleset_addr,
         })
     }
 
@@ -223,18 +230,63 @@ impl<'a> StableReader<'a> {
     fn read_mods(&self) -> Option<GameplayMods> {
         let status = self.read_status()?;
 
+        // only read gameplay mods when playing
         if status != 2 {
             return None;
         }
 
-        let mods_ptr_addr = self.menu_mods_addr + self.offsets.menu_mods.mods;
-        let mods_ptr = self.process.read_ptr32(mods_ptr_addr).ok()?;
-
-        if mods_ptr == 0 {
+        // we first find the ruleset pointer
+        let ruleset_ptr_addr = self.ruleset_addr + self.offsets.ruleset.ptr_offset;
+        let ruleset_ptr = self.process.read_ptr32(ruleset_ptr_addr).ok()?;
+        if ruleset_ptr == 0 {
+            return None;
+        }
+        let ruleset_base = self
+            .process
+            .read_ptr32(ruleset_ptr + self.offsets.ruleset.ptr_deref_offset)
+            .ok()?;
+        if ruleset_base == 0 {
             return None;
         }
 
-        let mods_value = self.process.read_i32(mods_ptr).ok()?;
+        // then traverse to the PlayContainer
+        let play_container = self
+            .process
+            .read_ptr32(ruleset_base + self.offsets.ruleset.play_container)
+            .ok()?;
+        if play_container == 0 {
+            return None;
+        }
+
+        // then to the score
+        let score = self
+            .process
+            .read_ptr32(play_container + self.offsets.ruleset.mods_base)
+            .ok()?;
+        if score == 0 {
+            return None;
+        }
+
+        // and then we can find the mods
+        let mods_xor_base = self
+            .process
+            .read_ptr32(score + self.offsets.ruleset.mods_ptr)
+            .ok()?;
+        if mods_xor_base == 0 {
+            return None;
+        }
+
+        // we read two values and XOR them to decode
+        let xor1 = self
+            .process
+            .read_i32(mods_xor_base + self.offsets.ruleset.mods_xor1)
+            .ok()?;
+        let xor2 = self
+            .process
+            .read_i32(mods_xor_base + self.offsets.ruleset.mods_xor2)
+            .ok()?;
+
+        let mods_value = xor1 ^ xor2;
 
         if mods_value == 0 {
             return Some(GameplayMods {
@@ -260,7 +312,7 @@ impl<'a> StableReader<'a> {
 
     pub fn read_beatmap(&mut self) -> Result<BeatmapData, MemoryError> {
         let unknown_data = BeatmapData {
-            id: -1,
+            id: 0,
             artist: "?".to_string(),
             title: "?".to_string(),
             difficulty_name: "?".to_string(),
@@ -307,7 +359,7 @@ impl<'a> StableReader<'a> {
         let id = self
             .process
             .read_i32(beatmap + self.offsets.beatmap.map_id)
-            .unwrap_or(-1);
+            .unwrap_or(0);
 
         let status_int = self
             .process
