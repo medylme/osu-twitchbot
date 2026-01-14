@@ -49,11 +49,11 @@ build:
 
 build-win: _ensure-dist
     cargo build --target {{windows_target}} --target-dir "{{target_dir}}"
-    cp "{{target_dir}}/{{windows_target}}/debug/{{name}}.exe" "{{dist_dir}}/{{name}}-windows-x86_64-debug.exe"
+    cp "{{target_dir}}/{{windows_target}}/debug/{{name}}.exe" "{{dist_dir}}/debug/{{name}}-windows-x86_64-debug.exe"
 
 build-linux: _ensure-dist
     cross build --target {{linux_target}} --target-dir "{{target_dir}}"
-    cp "{{target_dir}}/{{linux_target}}/debug/{{name}}" "{{dist_dir}}/{{name}}-linux-x86_64-debug"
+    cp "{{target_dir}}/{{linux_target}}/debug/{{name}}" "{{dist_dir}}/debug/{{name}}-linux-x86_64-debug"
 
 # builds - release
 
@@ -62,12 +62,12 @@ _ensure-dist:
 
 dist-win: _ensure-dist
     cargo build --target {{windows_target}} --target-dir "{{target_dir}}" --release
-    cp "{{target_dir}}/{{windows_target}}/release/{{name}}.exe" "{{dist_dir}}/{{name}}-windows-x86_64.exe"
+    cp "{{target_dir}}/{{windows_target}}/release/{{name}}.exe" "{{dist_dir}}/release/{{name}}-windows-x86_64.exe"
     @echo "Built: {{dist_dir}}/{{name}}-windows-x86_64.exe"
 
 dist-linux: _ensure-dist
     cross build --target {{linux_target}} --target-dir "{{target_dir}}" --release
-    cp "{{target_dir}}/{{linux_target}}/release/{{name}}" "{{dist_dir}}/{{name}}-linux-x86_64"
+    cp "{{target_dir}}/{{linux_target}}/release/{{name}}" "{{dist_dir}}/release/{{name}}-linux-x86_64"
     @echo "Built: {{dist_dir}}/{{name}}-linux-x86_64"
 
 dist: dist-win dist-linux
