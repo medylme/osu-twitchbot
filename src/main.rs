@@ -71,9 +71,11 @@ fn get_osu_event_forward() -> &'static OsuEventForwardType {
 }
 
 fn main() -> iced::Result {
-    updater::install::cleanup_old_binary();
-
-    let _ = updater::splash::run_startup_update_check();
+    #[cfg(not(debug_assertions))]
+    {
+        updater::install::cleanup_old_binary();
+        let _ = updater::splash::run_startup_update_check();
+    }
 
     log_info!("main", "Starting osu-twitchbot");
 
