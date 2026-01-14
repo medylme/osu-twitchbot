@@ -319,10 +319,14 @@ impl State {
                     _ => "None".to_string(),
                 };
 
-                let beatmap_link = format!("https://osu.ppy.sh/b/{}", beatmap.id);
+                let beatmap_link = if beatmap.id <= 0 {
+                    None
+                } else {
+                    Some(format!("https://osu.ppy.sh/b/{}", beatmap.id))
+                };
 
                 let data_rows: Vec<(&str, String)> = vec![
-                    ("ID", beatmap.id.to_string()),
+                    ("ID", if beatmap.id <= 0 { "Local".to_string() } else { beatmap.id.to_string() }),
                     ("Artist", beatmap.artist.clone()),
                     ("Title", beatmap.title.clone()),
                     ("Difficulty", beatmap.difficulty_name.clone()),
@@ -341,18 +345,25 @@ impl State {
                 }))
                 .spacing(4);
 
-                let link_row = row![
-                    text("Link").size(11).color(label_color).width(70),
-                    rich_text![
-                        span::<String, Font>(beatmap_link.clone())
-                            .color(link_color)
-                            .underline(true)
-                            .link(beatmap_link.clone())
+                let link_row = match &beatmap_link {
+                    Some(link) => row![
+                        text("Link").size(11).color(label_color).width(70),
+                        rich_text![
+                            span::<String, Font>(link.clone())
+                                .color(link_color)
+                                .underline(true)
+                                .link(link.clone())
+                        ]
+                        .size(11)
+                        .on_link_click(Message::LinkClicked)
                     ]
-                    .size(11)
-                    .on_link_click(Message::LinkClicked)
-                ]
-                .spacing(10);
+                    .spacing(10),
+                    None => row![
+                        text("Link").size(11).color(label_color).width(70),
+                        text("Local").size(11).color(value_color)
+                    ]
+                    .spacing(10),
+                };
 
                 column![table, link_row].spacing(4).padding(10)
             }
