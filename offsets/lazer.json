@@ -1,0 +1,48 @@
+{
+  "2026.102.1": {
+    "patterns": {
+      "base": "00 00 80 44 00 00 40 44 00 00 00 00 ?? ?? ?? ?? 00 00 00 00"
+    },
+    "base": {
+      "external_link_opener": -36
+    },
+    "external_link_opener": {
+      "api": 536
+    },
+    "api_access": {
+      "game": 784
+    },
+    "osu_game": {
+      "screen_stack": 1528
+    },
+    "screen_stack": {
+      "stack": 800
+    },
+    "osu_game_base": {
+      "beatmap": 1104
+    },
+    "working_beatmap": {
+      "beatmap_info": 8
+    },
+    "beatmap_info": {
+      "online_id": 140,
+      "metadata": 48,
+      "difficulty_name": 24,
+      "status": 136
+    },
+    "beatmap_metadata": {
+      "title": 24,
+      "artist": 40,
+      "author": 56
+    },
+    "realm_user": {
+      "username": 24
+    },
+    "player": {
+      "score": 1152
+    },
+    "score_info": {
+      "mods_json": 80
+    }
+  }
+}

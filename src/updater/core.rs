@@ -1,0 +1,123 @@
+use serde::Deserialize;
+use thiserror::Error;
+
+const GITHUB_API_URL: &str = "https://api.github.com/repos/medylme/osu-twitchbot/releases/latest";
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Debug, Error)]
+#[allow(dead_code)]
+pub enum UpdateError {
+    #[error("Network error: {0}")]
+    Network(#[from] reqwest::Error),
+
+    #[error("Failed to parse version: {0}")]
+    VersionParse(String),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Checksum not found for binary")]
+    ChecksumNotFound,
+
+    #[error("Checksum verification failed")]
+    ChecksumMismatch,
+
+    #[error("No binary available for this platform")]
+    UnsupportedPlatform,
+
+    #[error("No releases found")]
+    NoReleases,
+
+    #[error("Failed to restart: {0}")]
+    Restart(String),
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct GitHubRelease {
+    pub tag_name: String,
+    pub draft: bool,
+    pub prerelease: bool,
+    pub assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitHubAsset {
+    pub name: String,
+    pub browser_download_url: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ReleaseInfo {
+    pub version: semver::Version,
+    pub binary_url: String,
+    pub binary_name: String,
+    pub checksum_url: String,
+    pub checksum_name: String,
+    pub size: u64,
+}
+
+pub fn parse_version(version_str: &str) -> Result<semver::Version, UpdateError> {
+    let clean = version_str.strip_prefix('v').unwrap_or(version_str);
+    semver::Version::parse(clean).map_err(|e| UpdateError::VersionParse(e.to_string()))
+}
+
+pub fn current_version() -> Result<semver::Version, UpdateError> {
+    parse_version(CURRENT_VERSION)
+}
+
+pub async fn check_for_updates(client: &reqwest::Client) -> Result<Option<ReleaseInfo>, UpdateError> {
+    let response = client
+        .get(GITHUB_API_URL)
+        .header("User-Agent", format!("osu-twitchbot/{}", CURRENT_VERSION))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+
+    let release: GitHubRelease = response.error_for_status()?.json().await?;
+
+    if release.draft {
+        return Ok(None);
+    }
+
+    let remote_version = parse_version(&release.tag_name)?;
+    let current = current_version()?;
+
+    if remote_version <= current {
+        return Ok(None);
+    }
+
+    let binary_asset = get_platform_asset(&release).ok_or(UpdateError::UnsupportedPlatform)?;
+    let checksum_asset = get_checksum_asset(&release).ok_or(UpdateError::ChecksumNotFound)?;
+
+    Ok(Some(ReleaseInfo {
+        version: remote_version,
+        binary_url: binary_asset.browser_download_url.clone(),
+        binary_name: binary_asset.name.clone(),
+        checksum_url: checksum_asset.browser_download_url.clone(),
+        checksum_name: checksum_asset.name.clone(),
+        size: binary_asset.size,
+    }))
+}
+
+fn get_platform_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
+    let suffix = if cfg!(target_os = "windows") {
+        "windows-x86_64.exe"
+    } else if cfg!(target_os = "linux") {
+        "linux-x86_64"
+    } else {
+        return None;
+    };
+
+    release.assets.iter().find(|a| a.name.ends_with(suffix))
+}
+
+fn get_checksum_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
+    release.assets.iter().find(|a| a.name.ends_with(".sha256"))
+}
