@@ -1,8 +1,11 @@
+use std::sync::OnceLock;
+
 use serde::Deserialize;
 use thiserror::Error;
 
-const GITHUB_API_URL: &str = "https://api.github.com/repos/medylme/osu-twitchbot/releases/latest";
+const GITHUB_LATEST_RELEASE_URL: Option<&str> = option_env!("GITHUB_LATEST_RELEASE_URL");
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+static AUTO_UPDATE_ENABLED: OnceLock<bool> = OnceLock::new();
 
 #[derive(Debug, Error)]
 #[allow(dead_code)]
@@ -72,9 +75,15 @@ pub fn current_version() -> Result<semver::Version, UpdateError> {
     parse_version(CURRENT_VERSION)
 }
 
-pub async fn check_for_updates(client: &reqwest::Client) -> Result<Option<ReleaseInfo>, UpdateError> {
+pub async fn check_for_updates(
+    client: &reqwest::Client,
+) -> Result<Option<ReleaseInfo>, UpdateError> {
+    let Some(url) = GITHUB_LATEST_RELEASE_URL else {
+        return Ok(None);
+    };
+
     let response = client
-        .get(GITHUB_API_URL)
+        .get(url)
         .header("User-Agent", format!("osu-twitchbot/{}", CURRENT_VERSION))
         .header("Accept", "application/vnd.github+json")
         .send()
@@ -123,7 +132,18 @@ fn get_platform_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
     release.assets.iter().find(|a| a.name.ends_with(suffix))
 }
 
-fn get_checksum_asset<'a>(release: &'a GitHubRelease, binary_name: &str) -> Option<&'a GitHubAsset> {
+fn get_checksum_asset<'a>(
+    release: &'a GitHubRelease,
+    binary_name: &str,
+) -> Option<&'a GitHubAsset> {
     let checksum_name = format!("{}.sha256", binary_name);
     release.assets.iter().find(|a| a.name == checksum_name)
+}
+
+pub fn is_auto_update_enabled() -> bool {
+    GITHUB_LATEST_RELEASE_URL.is_some() && AUTO_UPDATE_ENABLED.get().copied().unwrap_or(true)
+}
+
+pub fn set_auto_update_enabled(enabled: bool) {
+    let _ = AUTO_UPDATE_ENABLED.set(enabled);
 }

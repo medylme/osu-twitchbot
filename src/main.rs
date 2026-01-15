@@ -28,17 +28,21 @@ use osu::core::{
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
 use twitch::{TwitchClient, TwitchCommand, TwitchEvent};
+#[cfg(not(debug_assertions))]
+use updater::core::is_auto_update_enabled;
+use updater::core::set_auto_update_enabled;
 
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
 
 fn main() -> iced::Result {
+    set_auto_update_enabled(args_auto_update());
+    set_theme_override(args_theme_override());
+
     #[cfg(not(debug_assertions))]
-    {
+    if is_auto_update_enabled() {
         updater::install::cleanup_old_binary();
         let _ = updater::splash::run_startup_update_check();
     }
-
-    set_theme_override(parse_theme_override());
 
     log_info!("main", "Starting osu-twitchbot");
 
@@ -335,7 +339,7 @@ fn theme(_state: &State) -> iced::Theme {
     get_current_theme()
 }
 
-fn parse_theme_override() -> ThemeOverride {
+fn args_theme_override() -> ThemeOverride {
     let args: Vec<String> = std::env::args().collect();
 
     for i in 0..args.len() {
@@ -354,4 +358,16 @@ fn parse_theme_override() -> ThemeOverride {
     }
 
     ThemeOverride::System
+}
+
+fn args_auto_update() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+
+    for arg in &args {
+        if arg == "--no-update" {
+            return false;
+        }
+    }
+
+    true
 }
