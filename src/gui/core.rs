@@ -6,12 +6,13 @@ use iced::widget::{
     button, center_x, center_y, column, container, rich_text, row, scrollable, span, text,
     text_input,
 };
-use iced::{Element, Fill, Font, color};
+use iced::{Element, Fill, Font};
 
 use super::components::{
     BOLD_FONT, code_block_container, primary_button, primary_text_input, tab_button,
     tab_button_active,
 };
+use super::theme::{get_current_theme, palette, ColorPalette};
 use crate::credentials::CredentialStore;
 use crate::logging::{LogEntry, LogLevel};
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
@@ -112,6 +113,9 @@ impl State {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        let theme = get_current_theme();
+        let p = palette(&theme);
+
         let tabs = row![
             button(text("Main").size(12))
                 .style(if self.active_tab == Tab::Main {
@@ -145,30 +149,30 @@ impl State {
         .spacing(2)
         .padding([5, 10]);
 
-        let tab_bar = container(tabs).width(Fill).style(|_| container::Style {
-            background: Some(color!(0x2a2a2a).into()),
+        let tab_bar = container(tabs).width(Fill).style(move |_| container::Style {
+            background: Some(p.bg_secondary.into()),
             ..Default::default()
         });
 
         let content = match self.active_tab {
-            Tab::Main => self.view_main_tab(),
-            Tab::Settings => self.view_settings_tab(),
-            Tab::Data => self.view_data_tab(),
-            Tab::Console => self.view_console_tab(),
+            Tab::Main => self.view_main_tab(&p),
+            Tab::Settings => self.view_settings_tab(&p),
+            Tab::Data => self.view_data_tab(&p),
+            Tab::Console => self.view_console_tab(&p),
         };
 
-        let footer = self.view_footer();
+        let footer = self.view_footer(&p);
 
         column![tab_bar, content, footer].into()
     }
 
-    fn view_main_tab(&self) -> Element<'_, Message> {
+    fn view_main_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
         let token_label = row![
             text("Token").size(14),
             rich_text![
                 span::<String, Font>("("),
                 span::<String, Font>("?")
-                    .color(color!(0x969eff))
+                    .color(p.accent)
                     .underline(true)
                     .link("https://osu-twitchbot.dyl.blue/"),
                 span::<String, Font>(")"),
@@ -220,9 +224,6 @@ impl State {
 
         let main_content = column![main_row].spacing(10).padding(10);
 
-        let info_color = color!(0x888888);
-        let link_color = color!(0x969eff);
-        let dim_color = color!(0x666666);
         let github_url = "https://github.com/medylme/osu-twitchbot";
 
         let version_string = if cfg!(debug_assertions) {
@@ -231,17 +232,17 @@ impl State {
             format!("osu! twitchbot (v{})", env!("CARGO_PKG_VERSION"))
         };
 
-        let version_text = text(version_string).size(12).color(info_color);
+        let version_text = text(version_string).size(12).color(p.text_secondary);
         let creator_text = rich_text![
-            span::<String, Font>("Created by ").color(info_color),
-            span::<String, Font>("me").color(dim_color),
+            span::<String, Font>("Created by ").color(p.text_secondary),
+            span::<String, Font>("me").color(p.text_muted),
             span::<String, Font>("dyl")
-                .color(link_color)
+                .color(p.accent)
                 .font(BOLD_FONT),
-            span::<String, Font>("me").color(dim_color),
-            span::<String, Font>(" • ").color(info_color),
+            span::<String, Font>("me").color(p.text_muted),
+            span::<String, Font>(" • ").color(p.text_secondary),
             span::<String, Font>("GitHub")
-                .color(link_color)
+                .color(p.accent)
                 .underline(true)
                 .link(github_url)
         ]
@@ -259,7 +260,7 @@ impl State {
         center_y(center_x(full_content)).height(Fill).into()
     }
 
-    fn view_settings_tab(&self) -> Element<'_, Message> {
+    fn view_settings_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
         let now_playing_header = text("Now Playing").size(14);
 
         let command_label = text("Command:").size(12);
@@ -290,9 +291,9 @@ impl State {
 
         let format_help = text("Available placeholders: {artist}, {title}, {diff}, {creator}, {mods}, {link}, {status}")
             .size(11)
-            .color(color!(0x888888));
+            .color(p.text_secondary);
 
-        let format_preview = self.build_format_preview();
+        let format_preview = self.build_format_preview(p);
 
         let settings_content = column![
             now_playing_header,
@@ -307,11 +308,7 @@ impl State {
         container(settings_content).height(Fill).into()
     }
 
-    fn view_data_tab(&self) -> Element<'_, Message> {
-        let link_color = color!(0xb08af5);
-        let label_color = color!(0x888888);
-        let value_color = color!(0xcccccc);
-
+    fn view_data_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
         let content = match &self.current_beatmap {
             Some(beatmap) => {
                 let mods_text = match &beatmap.mods {
@@ -337,8 +334,8 @@ impl State {
 
                 let table = column(data_rows.into_iter().map(|(label, value)| {
                     row![
-                        text(label).size(11).color(label_color).width(70),
-                        text(value).size(11).color(value_color),
+                        text(label).size(11).color(p.text_secondary).width(70),
+                        text(value).size(11).color(p.text_primary),
                     ]
                     .spacing(10)
                     .into()
@@ -347,10 +344,10 @@ impl State {
 
                 let link_row = match &beatmap_link {
                     Some(link) => row![
-                        text("Link").size(11).color(label_color).width(70),
+                        text("Link").size(11).color(p.text_secondary).width(70),
                         rich_text![
                             span::<String, Font>(link.clone())
-                                .color(link_color)
+                                .color(p.accent_alt)
                                 .underline(true)
                                 .link(link.clone())
                         ]
@@ -359,8 +356,8 @@ impl State {
                     ]
                     .spacing(10),
                     None => row![
-                        text("Link").size(11).color(label_color).width(70),
-                        text("Local").size(11).color(value_color)
+                        text("Link").size(11).color(p.text_secondary).width(70),
+                        text("Local").size(11).color(p.text_primary)
                     ]
                     .spacing(10),
                 };
@@ -370,11 +367,11 @@ impl State {
             None => {
                 let no_data = text("No beatmap data available")
                     .size(12)
-                    .color(label_color);
+                    .color(p.text_secondary);
 
                 let hint = text("Launch osu! and select a beatmap to see data here!")
                     .size(11)
-                    .color(color!(0x666666));
+                    .color(p.text_muted);
 
                 column![no_data, hint].spacing(5).padding(10)
             }
@@ -383,7 +380,7 @@ impl State {
         scrollable(content).height(Fill).width(Fill).into()
     }
 
-    fn view_console_tab(&self) -> Element<'_, Message> {
+    fn view_console_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
         // filter out debug logs
         let filtered_entries: Vec<&LogEntry> = self
             .log_entries
@@ -394,25 +391,25 @@ impl State {
         let inner_content: Element<'_, Message> = if filtered_entries.is_empty() {
             let placeholder = text("Console output will appear here...")
                 .size(12)
-                .color(color!(0x666666));
+                .color(p.text_muted);
             center_y(center_x(placeholder)).height(Fill).into()
         } else {
             let log_column = column(filtered_entries.iter().map(|entry| {
                 let level_color = match entry.level {
-                    LogLevel::Debug => color!(0x2196f3), // blue
-                    LogLevel::Info => color!(0x4caf50),  // green
-                    LogLevel::Warn => color!(0xffc107),  // yellow
-                    LogLevel::Error => color!(0xf44336), // red
+                    LogLevel::Debug => p.status_info,
+                    LogLevel::Info => p.status_success,
+                    LogLevel::Warn => p.status_warning,
+                    LogLevel::Error => p.status_error,
                 };
 
                 rich_text![
-                    span::<String, Font>(&entry.timestamp).color(color!(0x888888)),
+                    span::<String, Font>(&entry.timestamp).color(p.text_secondary),
                     span::<String, Font>("  "),
                     span::<String, Font>(format!("{:5}", entry.level)).color(level_color),
                     span::<String, Font>("  "),
-                    span::<String, Font>(format!("[{}]", entry.module)).color(color!(0x69b4ff)),
+                    span::<String, Font>(format!("[{}]", entry.module)).color(p.status_module),
                     span::<String, Font>(" "),
-                    span::<String, Font>(&entry.message),
+                    span::<String, Font>(&entry.message).color(p.text_primary),
                 ]
                 .size(11)
                 .font(Font::MONOSPACE)
@@ -432,9 +429,7 @@ impl State {
             .into()
     }
 
-    fn build_format_preview(&self) -> Element<'_, Message> {
-        let text_color = color!(0xcccccc);
-
+    fn build_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
         // use current beatmap data if available, otherwise use sample data
         let preview_text = if let Some(beatmap) = &self.current_beatmap {
             parse_beatmap_placeholders(beatmap, &self.np_format)
@@ -451,8 +446,8 @@ impl State {
                 .replace("{id}", "123456")
         };
 
-        let preview_label = span::<String, Font>("Preview: ").color(color!(0x888888));
-        let preview_content = span::<String, Font>(preview_text).color(text_color);
+        let preview_label = span::<String, Font>("Preview: ").color(p.text_secondary);
+        let preview_content = span::<String, Font>(preview_text).color(p.text_primary);
 
         let preview_rich_text = rich_text![preview_label, preview_content].size(11);
 
@@ -463,26 +458,29 @@ impl State {
             .into()
     }
 
-    fn view_footer(&self) -> Element<'_, Message> {
-        let dim_color = color!(0x666666);
+    fn view_footer(&self, p: &ColorPalette) -> Element<'_, Message> {
+        let text_primary = p.text_primary;
+        let text_muted = p.text_muted;
+        let bg_primary = p.bg_primary;
+
         let osu_status = rich_text![
-            span::<String, Font>("osu!"),
-            span::<String, Font>(" | ").color(dim_color),
-            span::<String, Font>(self.osu_status.to_string()),
+            span::<String, Font>("osu!").color(text_primary),
+            span::<String, Font>(" | ").color(text_muted),
+            span::<String, Font>(self.osu_status.to_string()).color(text_primary),
         ]
         .size(12);
         let twitch_status = rich_text![
-            span::<String, Font>("Twitch"),
-            span::<String, Font>(" | ").color(dim_color),
-            span::<String, Font>(self.twitch_status.to_string()),
+            span::<String, Font>("Twitch").color(text_primary),
+            span::<String, Font>(" | ").color(text_muted),
+            span::<String, Font>(self.twitch_status.to_string()).color(text_primary),
         ]
         .size(12);
 
         container(column![osu_status, twitch_status])
             .padding([5, 10])
             .width(Fill)
-            .style(|_| container::Style {
-                background: Some(color!(0x1a1a1a).into()),
+            .style(move |_| container::Style {
+                background: Some(bg_primary.into()),
                 ..Default::default()
             })
             .into()

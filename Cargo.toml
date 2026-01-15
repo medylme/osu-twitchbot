@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dark-light = "1"
 iced = { version = "0.14.0", features = ["tokio", "image"] }
 owo-colors = "4"
 keyring = { version = "3", features = ["sync-secret-service", "windows-native", "vendored"] }

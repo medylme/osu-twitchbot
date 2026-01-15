@@ -1,14 +1,8 @@
 use iced::border::Radius;
 use iced::widget::{button, container, text_input};
-use iced::{Border, Color, Font, Theme, color};
+use iced::{Border, Color, Font, Theme};
 
-// #969EFF
-pub const ACCENT_COLOR: Color = Color {
-    r: 0.588,
-    g: 0.620,
-    b: 1.0,
-    a: 1.0,
-};
+use super::theme::palette;
 
 pub const BOLD_FONT: Font = Font {
     weight: iced::font::Weight::Bold,
@@ -17,16 +11,12 @@ pub const BOLD_FONT: Font = Font {
     style: iced::font::Style::Normal,
 };
 
-pub fn primary_button(_theme: &Theme, _status: button::Status) -> button::Style {
+pub fn primary_button(theme: &Theme, _status: button::Status) -> button::Style {
+    let p = palette(theme);
     button::Style {
-        background: Some(iced::Background::Color(ACCENT_COLOR)),
-        text_color: Color {
-            r: 0.11,
-            g: 0.11,
-            b: 0.15,
-            a: 1.0,
-        },
-        border: iced::Border {
+        background: Some(iced::Background::Color(p.accent)),
+        text_color: p.text_on_accent,
+        border: Border {
             radius: Radius::new(20.0),
             width: 0.0,
             color: Color::TRANSPARENT,
@@ -36,52 +26,32 @@ pub fn primary_button(_theme: &Theme, _status: button::Status) -> button::Style 
     }
 }
 
-pub fn primary_text_input(_theme: &Theme, _status: text_input::Status) -> text_input::Style {
+pub fn primary_text_input(theme: &Theme, _status: text_input::Status) -> text_input::Style {
+    let p = palette(theme);
     text_input::Style {
-        background: iced::Background::Color(Color {
-            r: 0.11,
-            g: 0.11,
-            b: 0.15,
-            a: 1.0,
-        }),
-        border: iced::Border {
+        background: iced::Background::Color(p.bg_input),
+        border: Border {
             radius: Radius::new(8.0),
             width: 1.5,
-            color: ACCENT_COLOR,
+            color: p.accent,
         },
-        icon: Color {
-            r: 0.95,
-            g: 0.95,
-            b: 0.96,
-            a: 1.0,
-        },
+        icon: p.text_primary,
         placeholder: Color {
-            r: 0.95,
-            g: 0.95,
-            b: 0.96,
             a: 0.5,
+            ..p.text_primary
         },
-        value: Color {
-            r: 0.95,
-            g: 0.95,
-            b: 0.96,
-            a: 1.0,
-        },
-        selection: Color {
-            r: 0.588,
-            g: 0.620,
-            b: 1.0,
-            a: 0.3,
-        },
+        value: p.text_primary,
+        selection: Color { a: 0.3, ..p.accent },
     }
 }
 
-pub fn tab_button(_theme: &Theme, _status: button::Status) -> button::Style {
+pub fn tab_button(theme: &Theme, _status: button::Status) -> button::Style {
+    let p = palette(theme);
     button::Style {
-        background: Some(color!(0x3a3a3a).into()),
-        text_color: color!(0xaaaaaa),
+        background: Some(p.bg_tertiary.into()),
+        text_color: p.text_secondary,
         border: Border {
-            color: color!(0x444444),
+            color: p.border_muted,
             width: 1.0,
             radius: 2.0.into(),
         },
@@ -89,12 +59,13 @@ pub fn tab_button(_theme: &Theme, _status: button::Status) -> button::Style {
     }
 }
 
-pub fn tab_button_active(_theme: &Theme, _status: button::Status) -> button::Style {
+pub fn tab_button_active(theme: &Theme, _status: button::Status) -> button::Style {
+    let p = palette(theme);
     button::Style {
-        background: Some(color!(0x4a4a4a).into()),
-        text_color: color!(0xffffff),
+        background: Some(p.bg_elevated.into()),
+        text_color: p.text_primary,
         border: Border {
-            color: color!(0x666666),
+            color: p.border_default,
             width: 1.0,
             radius: 2.0.into(),
         },
@@ -102,11 +73,12 @@ pub fn tab_button_active(_theme: &Theme, _status: button::Status) -> button::Sty
     }
 }
 
-pub fn code_block_container(_theme: &Theme) -> container::Style {
+pub fn code_block_container(theme: &Theme) -> container::Style {
+    let p = palette(theme);
     container::Style {
-        background: Some(color!(0x1a1a1a).into()),
+        background: Some(p.bg_tertiary.into()),
         border: Border {
-            color: color!(0x333333),
+            color: p.border_subtle,
             width: 1.0,
             radius: 6.0.into(),
         },
