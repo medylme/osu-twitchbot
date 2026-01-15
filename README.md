@@ -21,6 +21,13 @@ A lightweight desktop app that reads beatmap information from osu! and can respo
 
 When a viewer types one of your configured commands in chat, the bot responds with the respective information.
 
+## Command-Line Arguments
+
+| Argument        | Description                            |
+| --------------- | -------------------------------------- |
+| `--theme`, `-t` | `light`, `dark`, or `system` (default) |
+| `--no-update`   | Disable auto-updater on start          |
+
 ## Command Placeholders
 
 ### Now Playing
@@ -73,6 +80,7 @@ Create a `.env` file in the project root:
 
 ```env
 TWITCH_CLIENT_ID=your_client_id_here
+GITHUB_LATEST_RELEASE_URL=https://api.github.com/repos/medylme/osu-twitchbot/releases/latest # or set your own
 TARGET_DIR=/path/to/target  # optional, for cross-compilation
 ```
 
