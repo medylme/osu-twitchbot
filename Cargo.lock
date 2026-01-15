@@ -3186,7 +3186,7 @@ dependencies = [
 
 [[package]]
 name = "osu-twitchbot"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "chrono",
  "dark-light",
