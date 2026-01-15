@@ -58,7 +58,8 @@ build-linux: _ensure-dist
 # builds - release
 
 _ensure-dist:
-    mkdir -p {{dist_dir}}
+    mkdir -p "{{dist_dir}}/debug"
+    mkdir -p "{{dist_dir}}/release"
 
 dist-win: _ensure-dist
     cargo build --target {{windows_target}} --target-dir "{{target_dir}}" --release
@@ -71,6 +72,6 @@ dist-linux: _ensure-dist
     @echo "Built: {{dist_dir}}/{{name}}-linux-x86_64"
 
 dist: dist-win dist-linux
-    cd {{dist_dir}} && sha256sum {{name}}-windows-x86_64.exe {{name}}-linux-x86_64 > checksums-{{version}}.sha256
-    @echo "Generated: {{dist_dir}}/checksums-{{version}}.sha256"
-    @echo "All builds complete in {{dist_dir}}"
+    cd "{{dist_dir}}/release" && sha256sum {{name}}-windows-x86_64.exe {{name}}-linux-x86_64 > checksums-{{version}}.sha256
+    @echo "Generated checksums: {{dist_dir}}/checksums-{{version}}.sha256"
+    @echo "Release builds completed in {{dist_dir}}/release"
