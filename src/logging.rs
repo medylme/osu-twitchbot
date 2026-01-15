@@ -7,6 +7,7 @@ use owo_colors::OwoColorize;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Debug,
