@@ -18,17 +18,55 @@ mod osu;
 mod twitch;
 mod updater;
 
-use crate::gui::core::{Message, State};
-use crate::logging::{LogEntry, get_log_channel};
-use crate::osu::core::{
+use gui::core::{Message, State};
+use gui::theme::{ThemeOverride, get_current_theme, set_theme_override};
+use logging::{LogEntry, get_log_channel};
+use osu::core::{
     BeatmapData, DetectedProcess, MemoryEvent, OsuClient, OsuCommand, OsuStatus,
     detect_osu_processes,
 };
-use crate::osu::lazer::run_lazer_reader;
-use crate::osu::stable::run_stable_reader;
-use crate::twitch::{TwitchClient, TwitchCommand, TwitchEvent};
+use osu::lazer::run_lazer_reader;
+use osu::stable::run_stable_reader;
+use twitch::{TwitchClient, TwitchCommand, TwitchEvent};
 
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
+
+fn main() -> iced::Result {
+    #[cfg(not(debug_assertions))]
+    {
+        updater::install::cleanup_old_binary();
+        let _ = updater::splash::run_startup_update_check();
+    }
+
+    set_theme_override(parse_theme_override());
+
+    log_info!("main", "Starting osu-twitchbot");
+
+    let icon = window::icon::from_file_data(
+        include_bytes!("../assets/icon.png"),
+        Some(image::ImageFormat::Png),
+    )
+    .ok();
+
+    iced::application(State::new, State::update, State::view)
+        .subscription(|_| {
+            Subscription::batch([
+                Subscription::run(osu_worker).map(Message::OsuEvent),
+                Subscription::run(twitch_worker).map(Message::TwitchEvent),
+                Subscription::run(log_worker).map(Message::LogEvent),
+            ])
+        })
+        .theme(theme)
+        .title(State::title)
+        .window(window::Settings {
+            icon,
+            resizable: false,
+            size: iced::Size::new(500.0, 250.0),
+            ..Default::default()
+        })
+        .centered()
+        .run()
+}
 
 type OsuChannelType = (
     mpsc::Sender<OsuCommand>,
@@ -68,40 +106,6 @@ fn get_osu_event_forward() -> &'static OsuEventForwardType {
         let (tx, rx) = mpsc::channel(10);
         (tx, Arc::new(Mutex::new(Some(rx))))
     })
-}
-
-fn main() -> iced::Result {
-    #[cfg(not(debug_assertions))]
-    {
-        updater::install::cleanup_old_binary();
-        let _ = updater::splash::run_startup_update_check();
-    }
-
-    log_info!("main", "Starting osu-twitchbot");
-
-    let icon = window::icon::from_file_data(
-        include_bytes!("../assets/icon.png"),
-        Some(image::ImageFormat::Png),
-    )
-    .ok();
-
-    iced::application(State::new, State::update, State::view)
-        .subscription(|_| {
-            Subscription::batch([
-                Subscription::run(osu_worker).map(Message::OsuEvent),
-                Subscription::run(twitch_worker).map(Message::TwitchEvent),
-                Subscription::run(log_worker).map(Message::LogEvent),
-            ])
-        })
-        .title(State::title)
-        .window(window::Settings {
-            icon,
-            resizable: false,
-            size: iced::Size::new(500.0, 250.0),
-            ..Default::default()
-        })
-        .centered()
-        .run()
 }
 
 fn log_worker() -> impl iced::futures::Stream<Item = LogEntry> {
@@ -325,4 +329,29 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
             handle.abort();
         }
     })
+}
+
+fn theme(_state: &State) -> iced::Theme {
+    get_current_theme()
+}
+
+fn parse_theme_override() -> ThemeOverride {
+    let args: Vec<String> = std::env::args().collect();
+
+    for i in 0..args.len() {
+        if (args[i] == "--theme" || args[i] == "-t")
+            && let Some(value) = args.get(i + 1)
+        {
+            if let Some(theme) = ThemeOverride::from_str(value) {
+                return theme;
+            } else {
+                eprintln!(
+                    "Warning: Invalid theme '{}'. Use 'light', 'dark', or 'system'.",
+                    value
+                );
+            }
+        }
+    }
+
+    ThemeOverride::System
 }
