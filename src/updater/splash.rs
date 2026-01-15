@@ -22,7 +22,11 @@ fn free_console() {
     }
 }
 
-fn prompt_open_release(version: &semver::Version, tag: &str, reason: &str) -> Result<(), UpdateError> {
+fn prompt_open_release(
+    version: &semver::Version,
+    tag: &str,
+    reason: &str,
+) -> Result<(), UpdateError> {
     println!(
         "\n\x1b[33m!\x1b[0m New version v{} found, but {}.",
         version, reason
@@ -111,7 +115,9 @@ async fn perform_update(
     let checksum_path = temp_dir.path().join(&checksum_name);
 
     // Download checksum file
-    if let Err(_) = super::download::download_file(client, &checksum_url, &checksum_path, 0, |_| {}).await {
+    if (super::download::download_file(client, &checksum_url, &checksum_path, 0, |_| {}).await)
+        .is_err()
+    {
         return prompt_open_release(
             &release.version,
             &release.tag_name,
@@ -130,16 +136,17 @@ async fn perform_update(
         }
     };
 
-    let expected_hash = match super::download::parse_checksum_file(&checksum_content, &release.binary_name) {
-        Some(hash) => hash,
-        None => {
-            return prompt_open_release(
-                &release.version,
-                &release.tag_name,
-                "could not verify signature (invalid checksum format)",
-            );
-        }
-    };
+    let expected_hash =
+        match super::download::parse_checksum_file(&checksum_content, &release.binary_name) {
+            Some(hash) => hash,
+            None => {
+                return prompt_open_release(
+                    &release.version,
+                    &release.tag_name,
+                    "could not verify signature (invalid checksum format)",
+                );
+            }
+        };
 
     let pb = ProgressBar::new(release.size);
     pb.set_style(
