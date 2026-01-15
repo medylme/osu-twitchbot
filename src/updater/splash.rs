@@ -1,6 +1,10 @@
+use std::io::{Write, stdin, stdout};
+
 use indicatif::{ProgressBar, ProgressStyle};
 
 use super::core::UpdateError;
+
+const RELEASES_URL: &str = "https://github.com/medylme/osu-twitchbot/releases/tag";
 
 #[cfg(all(target_os = "windows", not(debug_assertions)))]
 fn alloc_console() {
@@ -16,6 +20,28 @@ fn free_console() {
     unsafe {
         let _ = FreeConsole();
     }
+}
+
+fn prompt_open_release(version: &semver::Version, tag: &str, reason: &str) -> Result<(), UpdateError> {
+    println!(
+        "\n\x1b[33m!\x1b[0m New version v{} found, but {}.",
+        version, reason
+    );
+    print!("Open release page in browser? [Y/n] ");
+    let _ = stdout().flush();
+
+    let mut input = String::new();
+    if stdin().read_line(&mut input).is_ok() {
+        let input = input.trim().to_lowercase();
+        if input.is_empty() || input == "y" || input == "yes" {
+            let url = format!("{}/{}", RELEASES_URL, tag);
+            if open::that(&url).is_err() {
+                println!("Failed to open browser. Visit: {}", url);
+            }
+        }
+    }
+
+    Err(UpdateError::UserDeclined)
 }
 
 pub fn run_startup_update_check() -> Result<(), UpdateError> {
@@ -55,7 +81,12 @@ pub fn run_startup_update_check() -> Result<(), UpdateError> {
             }
         };
 
-        perform_update(&client, &release).await
+        let result = perform_update(&client, &release).await;
+
+        #[cfg(all(target_os = "windows", not(debug_assertions)))]
+        free_console();
+
+        result
     })
 }
 
@@ -63,17 +94,52 @@ async fn perform_update(
     client: &reqwest::Client,
     release: &super::core::ReleaseInfo,
 ) -> Result<(), UpdateError> {
+    // Check if checksum is available
+    let (checksum_url, checksum_name) = match (&release.checksum_url, &release.checksum_name) {
+        (Some(url), Some(name)) => (url.clone(), name.clone()),
+        _ => {
+            return prompt_open_release(
+                &release.version,
+                &release.tag_name,
+                "could not verify signature (no checksum file)",
+            );
+        }
+    };
+
     let temp_dir = tempfile::tempdir()?;
     let binary_path = temp_dir.path().join(&release.binary_name);
-    let checksum_path = temp_dir.path().join(&release.checksum_name);
+    let checksum_path = temp_dir.path().join(&checksum_name);
 
-    super::download::download_file(client, &release.checksum_url, &checksum_path, 0, |_| {})
-        .await?;
+    // Download checksum file
+    if let Err(_) = super::download::download_file(client, &checksum_url, &checksum_path, 0, |_| {}).await {
+        return prompt_open_release(
+            &release.version,
+            &release.tag_name,
+            "could not verify signature (failed to download checksum)",
+        );
+    }
 
-    let checksum_content = tokio::fs::read_to_string(&checksum_path).await?;
-    let expected_hash =
-        super::download::parse_checksum_file(&checksum_content, &release.binary_name)
-            .ok_or(UpdateError::ChecksumNotFound)?;
+    let checksum_content = match tokio::fs::read_to_string(&checksum_path).await {
+        Ok(content) => content,
+        Err(_) => {
+            return prompt_open_release(
+                &release.version,
+                &release.tag_name,
+                "could not verify signature (failed to read checksum)",
+            );
+        }
+    };
+
+    let expected_hash = match super::download::parse_checksum_file(&checksum_content, &release.binary_name) {
+        Some(hash) => hash,
+        None => {
+            return prompt_open_release(
+                &release.version,
+                &release.tag_name,
+                "could not verify signature (invalid checksum format)",
+            );
+        }
+    };
 
     let pb = ProgressBar::new(release.size);
     pb.set_style(
@@ -110,14 +176,21 @@ async fn perform_update(
     spinner.set_message("Verifying...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    if !super::download::verify_checksum(&binary_path, &expected_hash).await? {
-        spinner.finish_and_clear();
-        println!("\x1b[31m✗\x1b[0m Verification failed");
-        return Err(UpdateError::ChecksumMismatch);
+    match super::download::verify_checksum(&binary_path, &expected_hash).await {
+        Ok(true) => {
+            spinner.finish_and_clear();
+            println!("\x1b[32m✓\x1b[0m Verified");
+        }
+        Ok(false) | Err(_) => {
+            spinner.finish_and_clear();
+            println!("\x1b[31m✗\x1b[0m Verification failed");
+            return prompt_open_release(
+                &release.version,
+                &release.tag_name,
+                "could not verify signature (checksum mismatch)",
+            );
+        }
     }
-
-    spinner.finish_and_clear();
-    println!("\x1b[32m✓\x1b[0m Verified");
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(

@@ -30,6 +30,9 @@ pub enum UpdateError {
 
     #[error("Failed to restart: {0}")]
     Restart(String),
+
+    #[error("User declined update")]
+    UserDeclined,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,10 +55,11 @@ pub struct GitHubAsset {
 #[allow(dead_code)]
 pub struct ReleaseInfo {
     pub version: semver::Version,
+    pub tag_name: String,
     pub binary_url: String,
     pub binary_name: String,
-    pub checksum_url: String,
-    pub checksum_name: String,
+    pub checksum_url: Option<String>,
+    pub checksum_name: Option<String>,
     pub size: u64,
 }
 
@@ -94,14 +98,15 @@ pub async fn check_for_updates(client: &reqwest::Client) -> Result<Option<Releas
     }
 
     let binary_asset = get_platform_asset(&release).ok_or(UpdateError::UnsupportedPlatform)?;
-    let checksum_asset = get_checksum_asset(&release).ok_or(UpdateError::ChecksumNotFound)?;
+    let checksum_asset = get_checksum_asset(&release, &binary_asset.name);
 
     Ok(Some(ReleaseInfo {
         version: remote_version,
+        tag_name: release.tag_name.clone(),
         binary_url: binary_asset.browser_download_url.clone(),
         binary_name: binary_asset.name.clone(),
-        checksum_url: checksum_asset.browser_download_url.clone(),
-        checksum_name: checksum_asset.name.clone(),
+        checksum_url: checksum_asset.map(|a| a.browser_download_url.clone()),
+        checksum_name: checksum_asset.map(|a| a.name.clone()),
         size: binary_asset.size,
     }))
 }
@@ -118,6 +123,7 @@ fn get_platform_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
     release.assets.iter().find(|a| a.name.ends_with(suffix))
 }
 
-fn get_checksum_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
-    release.assets.iter().find(|a| a.name.ends_with(".sha256"))
+fn get_checksum_asset<'a>(release: &'a GitHubRelease, binary_name: &str) -> Option<&'a GitHubAsset> {
+    let checksum_name = format!("{}.sha256", binary_name);
+    release.assets.iter().find(|a| a.name == checksum_name)
 }
