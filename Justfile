@@ -72,6 +72,9 @@ dist-linux: _ensure-dist
     @echo "Built: {{dist_dir}}/{{name}}-linux-x86_64"
 
 dist: dist-win dist-linux
-    cd "{{dist_dir}}/release" && sha256sum {{name}}-windows-x86_64.exe {{name}}-linux-x86_64 > checksums-{{version}}.sha256
-    @echo "Generated checksums: {{dist_dir}}/checksums-{{version}}.sha256"
+    cd "{{dist_dir}}/release" && sha256sum {{name}}-windows-x86_64.exe > {{name}}-windows-x86_64.exe.sha256
+    cd "{{dist_dir}}/release" && sha256sum {{name}}-linux-x86_64 > {{name}}-linux-x86_64.sha256
+    @echo "Generated checksums:"
+    @echo "  {{dist_dir}}/release/{{name}}-windows-x86_64.exe.sha256"
+    @echo "  {{dist_dir}}/release/{{name}}-linux-x86_64.sha256"
     @echo "Release builds completed in {{dist_dir}}/release"
