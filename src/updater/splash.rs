@@ -82,7 +82,10 @@ async fn perform_update(
             .unwrap()
             .progress_chars("#>-"),
     );
-    pb.set_message(format!("Downloading v{}...", release.version));
+    pb.set_message(format!(
+        "New version available! Downloading v{}...",
+        release.version
+    ));
 
     super::download::download_file(
         client,
