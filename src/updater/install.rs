@@ -9,17 +9,26 @@ pub fn get_current_exe() -> Result<PathBuf, UpdateError> {
 pub fn cleanup_old_binary() {
     if let Ok(current_exe) = get_current_exe() {
         let old_path = current_exe.with_extension("old");
-        if old_path.exists() {
-            let _ = std::fs::remove_file(&old_path);
-        }
+        try_remove_file(&old_path);
 
         #[cfg(windows)]
         {
             let exe_old = current_exe.with_extension("exe.old");
-            if exe_old.exists() {
-                let _ = std::fs::remove_file(&exe_old);
-            }
+            try_remove_file(&exe_old);
         }
+    }
+}
+
+fn try_remove_file(path: &Path) {
+    if !path.exists() {
+        return;
+    }
+
+    for _ in 0..5 {
+        if std::fs::remove_file(path).is_ok() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
 }
 
