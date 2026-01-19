@@ -3,8 +3,9 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::VERSION;
+
 const GITHUB_LATEST_RELEASE_URL: Option<&str> = option_env!("GITHUB_LATEST_RELEASE_URL");
-const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 static AUTO_UPDATE_ENABLED: OnceLock<bool> = OnceLock::new();
 
 #[derive(Debug, Error)]
@@ -72,7 +73,7 @@ pub fn parse_version(version_str: &str) -> Result<semver::Version, UpdateError> 
 }
 
 pub fn current_version() -> Result<semver::Version, UpdateError> {
-    parse_version(CURRENT_VERSION)
+    parse_version(VERSION)
 }
 
 pub async fn check_for_updates(
@@ -84,7 +85,7 @@ pub async fn check_for_updates(
 
     let response = client
         .get(url)
-        .header("User-Agent", format!("osu-twitchbot/{}", CURRENT_VERSION))
+        .header("User-Agent", format!("osu-twitchbot/{}", VERSION))
         .header("Accept", "application/vnd.github+json")
         .send()
         .await?;

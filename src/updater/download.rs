@@ -4,6 +4,8 @@ use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
+use crate::VERSION;
+
 use super::core::UpdateError;
 
 pub async fn download_file<F>(
@@ -18,7 +20,7 @@ where
 {
     let response = client
         .get(url)
-        .header("User-Agent", format!("osu-twitchbot/{}", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", format!("osu-twitchbot/{}", VERSION))
         .send()
         .await?
         .error_for_status()?;

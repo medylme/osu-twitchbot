@@ -21,7 +21,9 @@ use crate::twitch::{
     DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, TwitchCommand, TwitchEvent, TwitchStatus,
     parse_beatmap_placeholders,
 };
-use crate::{get_osu_channel, get_twitch_channel, log_debug, log_error, log_info, log_warn};
+use crate::{
+    VERSION, get_osu_channel, get_twitch_channel, log_debug, log_error, log_info, log_warn,
+};
 
 pub type CommandReceiver<T> = Arc<Mutex<Option<mpsc::Receiver<T>>>>;
 
@@ -259,7 +261,7 @@ impl State {
         let version_string = if cfg!(debug_assertions) {
             "osu! twitchbot (DEV)".to_string()
         } else {
-            format!("osu! twitchbot (v{})", env!("CARGO_PKG_VERSION"))
+            format!("osu! twitchbot (v{})", VERSION)
         };
 
         let version_text = text(version_string).size(12).color(p.text_secondary);

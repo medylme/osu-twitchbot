@@ -5,7 +5,7 @@ use chrono::Local;
 use iced::futures::channel::mpsc;
 use owo_colors::OwoColorize;
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+use crate::VERSION;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
