@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::time::{self, Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::osu::core::{MemoryEvent, OsuCommand};
 use crate::{log_debug, log_error, log_info, log_warn};

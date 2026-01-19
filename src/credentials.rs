@@ -1,7 +1,8 @@
 use keyring::Entry;
 use thiserror::Error;
 
-const SERVICE_NAME: &str = "dyl-osu-twitchbot";
+use super::APP_NAME;
+
 const TOKEN_KEY: &str = "twitch-access-token";
 
 #[derive(Debug, Error)]
@@ -16,7 +17,7 @@ pub struct CredentialStore;
 
 impl CredentialStore {
     fn entry() -> Result<Entry, CredentialError> {
-        Ok(Entry::new(SERVICE_NAME, TOKEN_KEY)?)
+        Ok(Entry::new(APP_NAME, TOKEN_KEY)?)
     }
 
     pub fn save_token(token: &str) -> Result<(), CredentialError> {

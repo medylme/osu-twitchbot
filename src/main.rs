@@ -15,6 +15,7 @@ mod credentials;
 mod gui;
 mod logging;
 mod osu;
+mod preferences;
 mod twitch;
 mod updater;
 
@@ -32,6 +33,8 @@ use twitch::{TwitchClient, TwitchCommand, TwitchEvent};
 use updater::core::is_auto_update_enabled;
 use updater::core::set_auto_update_enabled;
 
+pub const APP_NAME: &str = "dyl-osu-twitchbot";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
 
 fn main() -> iced::Result {

@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use iced::Alignment::Center;
 use iced::futures::channel::mpsc;
 use iced::widget::{
-    button, center_x, center_y, column, container, rich_text, row, scrollable, span, text,
-    text_input,
+    button, center_x, center_y, checkbox, column, container, rich_text, row, scrollable, span,
+    text, text_input,
 };
 use iced::{Element, Fill, Font};
 
@@ -12,10 +12,11 @@ use super::components::{
     BOLD_FONT, code_block_container, primary_button, primary_text_input, tab_button,
     tab_button_active,
 };
-use super::theme::{get_current_theme, palette, ColorPalette};
+use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
 use crate::logging::{LogEntry, LogLevel};
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
+use crate::preferences::PreferencesStore;
 use crate::twitch::{
     DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, TwitchCommand, TwitchEvent, TwitchStatus,
     parse_beatmap_placeholders,
@@ -36,6 +37,7 @@ pub enum Tab {
 pub enum Message {
     TabSelected(Tab),
     TokenInputChanged(String),
+    AutoConnectToggled(bool),
     TokenHelpClicked,
     ConnectClicked,
     DisconnectClicked,
@@ -57,6 +59,7 @@ pub struct State {
     active_tab: Tab,
     token_input_value: String,
     token_saved: bool,
+    auto_connect_value: bool,
     np_command: String,
     np_format: String,
     current_beatmap: Option<BeatmapData>,
@@ -91,17 +94,34 @@ impl State {
             }
         };
 
+        let auto_connect_value = PreferencesStore::load()
+            .map(|prefs| prefs.auto_connect())
+            .unwrap_or(false);
+
+        let twitch_status = if auto_connect_value && token_saved {
+            log_info!("gui", "Auto-connecting to Twitch...");
+            let _ = twitch_cmd_tx.clone().try_send(TwitchCommand::Connect {
+                token: token_input_value.clone(),
+                np_command: DEFAULT_NP_COMMAND.to_string(),
+                np_format: DEFAULT_NP_FORMAT.to_string(),
+            });
+            TwitchStatus::Connecting
+        } else {
+            TwitchStatus::default()
+        };
+
         Self {
             active_tab: Tab::Main,
             token_input_value,
             token_saved,
+            auto_connect_value,
             np_command: DEFAULT_NP_COMMAND.to_string(),
             np_format: DEFAULT_NP_FORMAT.to_string(),
             current_beatmap: None,
             osu_status: OsuStatus::default(),
             osu_cmd_tx,
             osu_cmd_rx,
-            twitch_status: TwitchStatus::default(),
+            twitch_status,
             twitch_cmd_tx,
             twitch_cmd_rx,
             log_entries: Vec::new(),
@@ -149,10 +169,12 @@ impl State {
         .spacing(2)
         .padding([5, 10]);
 
-        let tab_bar = container(tabs).width(Fill).style(move |_| container::Style {
-            background: Some(p.bg_secondary.into()),
-            ..Default::default()
-        });
+        let tab_bar = container(tabs)
+            .width(Fill)
+            .style(move |_| container::Style {
+                background: Some(p.bg_secondary.into()),
+                ..Default::default()
+            });
 
         let content = match self.active_tab {
             Tab::Main => self.view_main_tab(&p),
@@ -222,7 +244,15 @@ impl State {
             main_row = main_row.push(clear_btn);
         }
 
-        let main_content = column![main_row].spacing(10).padding(10);
+        let auto_connect_checkbox = checkbox(self.auto_connect_value)
+            .label("Auto-connect on startup")
+            .on_toggle(Message::AutoConnectToggled)
+            .size(14)
+            .text_size(12);
+
+        let main_content = column![main_row, auto_connect_checkbox]
+            .spacing(10)
+            .padding(10);
 
         let github_url = "https://github.com/medylme/osu-twitchbot";
 
@@ -236,9 +266,7 @@ impl State {
         let creator_text = rich_text![
             span::<String, Font>("Created by ").color(p.text_secondary),
             span::<String, Font>("me").color(p.text_muted),
-            span::<String, Font>("dyl")
-                .color(p.accent)
-                .font(BOLD_FONT),
+            span::<String, Font>("dyl").color(p.accent).font(BOLD_FONT),
             span::<String, Font>("me").color(p.text_muted),
             span::<String, Font>(" • ").color(p.text_secondary),
             span::<String, Font>("GitHub")
@@ -323,7 +351,14 @@ impl State {
                 };
 
                 let data_rows: Vec<(&str, String)> = vec![
-                    ("ID", if beatmap.id <= 0 { "Local".to_string() } else { beatmap.id.to_string() }),
+                    (
+                        "ID",
+                        if beatmap.id <= 0 {
+                            "Local".to_string()
+                        } else {
+                            beatmap.id.to_string()
+                        },
+                    ),
                     ("Artist", beatmap.artist.clone()),
                     ("Title", beatmap.title.clone()),
                     ("Difficulty", beatmap.difficulty_name.clone()),
@@ -493,6 +528,12 @@ impl State {
             }
             Message::TokenInputChanged(value) => {
                 self.token_input_value = value;
+            }
+            Message::AutoConnectToggled(value) => {
+                self.auto_connect_value = value;
+                if let Err(e) = PreferencesStore::set_auto_connect(value) {
+                    log_warn!("gui", "Failed to save auto-connect preference: {}", e);
+                }
             }
             Message::TokenHelpClicked => {
                 let _ = open::that("https://osu-twitchbot.dyl.blue/");
