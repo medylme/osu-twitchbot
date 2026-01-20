@@ -105,18 +105,35 @@ impl State {
             }
         };
 
-        let auto_connect_value = PreferencesStore::load()
-            .map(|prefs| prefs.auto_connect())
-            .unwrap_or(false);
+        let (auto_connect_value, np_command, np_format, pp_command, pp_format) =
+            match PreferencesStore::load() {
+                Ok(prefs) => (
+                    prefs.auto_connect(),
+                    prefs.np_command().to_string(),
+                    prefs.np_format().to_string(),
+                    prefs.pp_command().to_string(),
+                    prefs.pp_format().to_string(),
+                ),
+                Err(e) => {
+                    log_warn!("gui", "Failed to load preferences: {}", e);
+                    (
+                        false,
+                        DEFAULT_NP_COMMAND.to_string(),
+                        DEFAULT_NP_FORMAT.to_string(),
+                        DEFAULT_PP_COMMAND.to_string(),
+                        DEFAULT_PP_FORMAT.to_string(),
+                    )
+                }
+            };
 
         let twitch_status = if auto_connect_value && token_saved {
             log_info!("gui", "Auto-connecting to Twitch...");
             let _ = twitch_cmd_tx.clone().try_send(TwitchCommand::Connect {
                 token: token_input_value.clone(),
-                np_command: DEFAULT_NP_COMMAND.to_string(),
-                np_format: DEFAULT_NP_FORMAT.to_string(),
-                pp_command: DEFAULT_PP_COMMAND.to_string(),
-                pp_format: DEFAULT_PP_FORMAT.to_string(),
+                np_command: np_command.clone(),
+                np_format: np_format.clone(),
+                pp_command: pp_command.clone(),
+                pp_format: pp_format.clone(),
             });
             TwitchStatus::Connecting
         } else {
@@ -128,10 +145,10 @@ impl State {
             token_input_value,
             token_saved,
             auto_connect_value,
-            np_command: DEFAULT_NP_COMMAND.to_string(),
-            np_format: DEFAULT_NP_FORMAT.to_string(),
-            pp_command: DEFAULT_PP_COMMAND.to_string(),
-            pp_format: DEFAULT_PP_FORMAT.to_string(),
+            np_command,
+            np_format,
+            pp_command,
+            pp_format,
             current_beatmap: None,
             cached_pp: None,
             osu_status: OsuStatus::default(),
@@ -683,6 +700,9 @@ impl State {
             Message::NpCommandChanged(value) => {
                 log_debug!("gui", "Changed np_command to {}", value);
                 self.np_command = value;
+                if let Err(e) = PreferencesStore::set_np_command(self.np_command.clone()) {
+                    log_warn!("gui", "Failed to save np_command: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
@@ -695,6 +715,9 @@ impl State {
             Message::NpFormatChanged(value) => {
                 log_debug!("gui", "Changed np_format to {}", value);
                 self.np_format = value;
+                if let Err(e) = PreferencesStore::set_np_format(self.np_format.clone()) {
+                    log_warn!("gui", "Failed to save np_format: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
@@ -707,6 +730,9 @@ impl State {
             Message::ResetNpCommand => {
                 log_debug!("gui", "Reset np_command to default");
                 self.np_command = DEFAULT_NP_COMMAND.to_string();
+                if let Err(e) = PreferencesStore::set_np_command(self.np_command.clone()) {
+                    log_warn!("gui", "Failed to save np_command: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
@@ -719,6 +745,9 @@ impl State {
             Message::ResetNpFormat => {
                 log_debug!("gui", "Reset np_format to default");
                 self.np_format = DEFAULT_NP_FORMAT.to_string();
+                if let Err(e) = PreferencesStore::set_np_format(self.np_format.clone()) {
+                    log_warn!("gui", "Failed to save np_format: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
@@ -731,6 +760,9 @@ impl State {
             Message::PpCommandChanged(value) => {
                 log_debug!("gui", "Changed pp_command to {}", value);
                 self.pp_command = value;
+                if let Err(e) = PreferencesStore::set_pp_command(self.pp_command.clone()) {
+                    log_warn!("gui", "Failed to save pp_command: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
@@ -743,6 +775,9 @@ impl State {
             Message::PpFormatChanged(value) => {
                 log_debug!("gui", "Changed pp_format to {}", value);
                 self.pp_format = value;
+                if let Err(e) = PreferencesStore::set_pp_format(self.pp_format.clone()) {
+                    log_warn!("gui", "Failed to save pp_format: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
@@ -755,6 +790,9 @@ impl State {
             Message::ResetPpCommand => {
                 log_debug!("gui", "Reset pp_command to default");
                 self.pp_command = DEFAULT_PP_COMMAND.to_string();
+                if let Err(e) = PreferencesStore::set_pp_command(self.pp_command.clone()) {
+                    log_warn!("gui", "Failed to save pp_command: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
@@ -767,6 +805,9 @@ impl State {
             Message::ResetPpFormat => {
                 log_debug!("gui", "Reset pp_format to default");
                 self.pp_format = DEFAULT_PP_FORMAT.to_string();
+                if let Err(e) = PreferencesStore::set_pp_format(self.pp_format.clone()) {
+                    log_warn!("gui", "Failed to save pp_format: {}", e);
+                }
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
