@@ -21,7 +21,7 @@ pub const DEFAULT_NP_FORMAT: &str =
     "{artist} - {title} [{diff}] ({creator}) {mods} | {status} {link}";
 pub const DEFAULT_PP_COMMAND: &str = "!pp";
 pub const DEFAULT_PP_FORMAT: &str =
-    "{mods} 95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp";
+    "95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp {mods}";
 const SOCKET_KEEPALIVE_SECONDS: u64 = 30;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;

@@ -63,7 +63,7 @@ Default:
 Default:
 
 ```
-{mods} 95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp
+95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp {mods}
 ```
 
 ## Building from Source
