@@ -95,6 +95,7 @@ Create a `.env` file in the project root:
 TWITCH_CLIENT_ID=your_client_id_here
 GITHUB_LATEST_RELEASE_URL=https://api.github.com/repos/medylme/osu-twitchbot/releases/latest # or set your own
 TARGET_DIR=/path/to/target  # optional, for cross-compilation
+DIST_DIR=/path/to/dist      # optional, for cross-compilation
 ```
 
 `TWITCH_CLIENT_ID` is compiled into the binary at build time.
