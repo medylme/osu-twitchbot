@@ -380,7 +380,7 @@ impl<'a> StableReader<'a> {
         let status = match status_int {
             0 => BeatmapStatus::Unknown,
             1 => BeatmapStatus::NotSubmitted,
-            2 => BeatmapStatus::Pending,
+            2 => BeatmapStatus::StablePending,
             3 => BeatmapStatus::Unknown,
             4 => BeatmapStatus::Ranked,
             5 => BeatmapStatus::Approved,

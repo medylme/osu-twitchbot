@@ -89,6 +89,7 @@ pub enum BeatmapStatus {
     Qualified,
     Loved,
     Graveyard,
+    StablePending,
 }
 
 impl Display for BeatmapStatus {
@@ -103,6 +104,7 @@ impl Display for BeatmapStatus {
             BeatmapStatus::Qualified => write!(f, "Qualified"),
             BeatmapStatus::Loved => write!(f, "Loved"),
             BeatmapStatus::Graveyard => write!(f, "Graveyard"),
+            BeatmapStatus::StablePending => write!(f, "Pending/Graveyard"),
         }
     }
 }
