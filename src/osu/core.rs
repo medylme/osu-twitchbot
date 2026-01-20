@@ -2,15 +2,17 @@ use std::fmt::Display;
 use std::io;
 use std::path::Path;
 
+use iced::futures::channel::mpsc;
 use serde::Deserialize;
 
 use crate::log_debug;
 
 pub const DATA_POLLING_INTERVAL_MS: u64 = 100;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum OsuCommand {
     RequestBeatmapData,
+    UpdateEventForwardSender(mpsc::Sender<MemoryEvent>),
 }
 
 #[derive(Debug, Clone)]

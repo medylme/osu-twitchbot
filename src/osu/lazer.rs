@@ -151,6 +151,9 @@ pub async fn run_lazer_reader(
                         let _ = tx.send(event.clone()).await;
                         let _ = forward_tx.send(event).await;
                     }
+                    OsuCommand::UpdateEventForwardSender(new_sender) => {
+                        *forward_tx = new_sender;
+                    }
                 }
             }
         }
