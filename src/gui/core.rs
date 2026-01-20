@@ -105,26 +105,14 @@ impl State {
             }
         };
 
-        let (auto_connect_value, np_command, np_format, pp_command, pp_format) =
-            match PreferencesStore::load() {
-                Ok(prefs) => (
-                    prefs.auto_connect(),
-                    prefs.np_command().to_string(),
-                    prefs.np_format().to_string(),
-                    prefs.pp_command().to_string(),
-                    prefs.pp_format().to_string(),
-                ),
-                Err(e) => {
-                    log_warn!("gui", "Failed to load preferences: {}", e);
-                    (
-                        false,
-                        DEFAULT_NP_COMMAND.to_string(),
-                        DEFAULT_NP_FORMAT.to_string(),
-                        DEFAULT_PP_COMMAND.to_string(),
-                        DEFAULT_PP_FORMAT.to_string(),
-                    )
-                }
-            };
+        let prefs = PreferencesStore::load_or_default();
+        let (auto_connect_value, np_command, np_format, pp_command, pp_format) = (
+            prefs.auto_connect(),
+            prefs.np_command().to_string(),
+            prefs.np_format().to_string(),
+            prefs.pp_command().to_string(),
+            prefs.pp_format().to_string(),
+        );
 
         let twitch_status = if auto_connect_value && token_saved {
             log_info!("gui", "Auto-connecting to Twitch...");
