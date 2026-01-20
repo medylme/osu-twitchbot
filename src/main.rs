@@ -15,6 +15,7 @@ mod credentials;
 mod gui;
 mod logging;
 mod osu;
+mod placeholders;
 mod preferences;
 mod twitch;
 mod updater;
@@ -184,6 +185,7 @@ fn osu_worker() -> impl iced::futures::Stream<Item = MemoryEvent> {
                 OsuClient::Stable => {
                     run_stable_reader(
                         process.pid,
+                        process.songs_folder.clone(),
                         &mut tx,
                         &mut cmd_rx,
                         &mut forward_tx,
@@ -231,6 +233,8 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
                     token,
                     np_command,
                     np_format,
+                    pp_command,
+                    pp_format,
                 } => {
                     // clean up any existing connections
                     if let Some(handle) = websocket_handle.take() {
@@ -238,7 +242,9 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
                     }
                     current_client = None;
 
-                    let result = TwitchClient::new(&token, np_command, np_format).await;
+                    let result =
+                        TwitchClient::new(&token, np_command, np_format, pp_command, pp_format)
+                            .await;
                     match result {
                         Ok(client) => {
                             let client = Arc::new(client);
@@ -324,9 +330,13 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
                 TwitchCommand::UpdatePreferences {
                     np_command,
                     np_format,
+                    pp_command,
+                    pp_format,
                 } => {
                     if let Some(ref client) = current_client {
-                        client.update_preferences(np_command, np_format).await;
+                        client
+                            .update_preferences(np_command, np_format, pp_command, pp_format)
+                            .await;
                     }
                 }
             }

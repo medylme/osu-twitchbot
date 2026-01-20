@@ -3240,6 +3240,7 @@ dependencies = [
  "open",
  "owo-colors",
  "reqwest",
+ "rosu-pp",
  "semver",
  "serde",
  "serde_json",
@@ -3837,6 +3838,28 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rosu-map"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "907d85647905d8de0b5560a8e2d87b7bf457b4b22cdd8f2025c1ff384435ec25"
+
+[[package]]
+name = "rosu-mods"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3966ad347b6a8140feaa2424c947ada9b69d29f6966ef2590db34d456eb137be"
+
+[[package]]
+name = "rosu-pp"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "002a6b12cedcb185f4051f0b3d0466e0b61ff414a9ca8375f09be581c0e70f06"
+dependencies = [
+ "rosu-map",
+ "rosu-mods",
 ]
 
 [[package]]

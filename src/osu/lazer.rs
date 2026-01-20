@@ -5,12 +5,10 @@ use serde::{Deserialize, Serialize};
 use tokio::time::{self, Duration};
 
 use super::core::{
-    BeatmapData, BeatmapStatus, GameplayMods, MemoryError, MemoryEvent, ModInfo, OsuCommand,
-    OsuStatus, ProcessMemory, order_mods, parse_pattern,
+    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods, MemoryError, MemoryEvent,
+    ModInfo, OsuCommand, OsuStatus, ProcessMemory, order_mods, parse_pattern,
 };
 use crate::{log_debug, log_error, log_info, log_warn};
-
-const DATA_POLLING_INTERVAL_MS: u64 = 100;
 
 // compares version strings in hashmap to get latest
 fn get_latest_version(offsets_map: &HashMap<String, Offsets>) -> Option<&str> {
@@ -32,6 +30,12 @@ pub async fn run_lazer_reader(
     forward_tx: &mut iced::futures::channel::mpsc::Sender<MemoryEvent>,
     current_beatmap: &mut Option<BeatmapData>,
 ) -> Result<(), MemoryError> {
+    log_debug!(
+        "memory-lazer",
+        "Starting lazer reader with version: {:?}",
+        version
+    );
+
     let _ = tx
         .send(MemoryEvent::StatusChanged(OsuStatus::Initializing))
         .await;
@@ -168,6 +172,10 @@ struct Offsets {
     realm_user: RealmUser,
     player: Player,
     score_info: ScoreInfo,
+    #[serde(default)]
+    storage: StorageOffsets,
+    #[serde(default)]
+    wrapped_storage: WrappedStorageOffsets,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -203,6 +211,8 @@ struct ScreenStack {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct OsuGameBase {
     beatmap: usize,
+    #[serde(default)]
+    storage: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -216,6 +226,8 @@ struct BeatmapInfo {
     metadata: usize,
     difficulty_name: usize,
     status: usize,
+    #[serde(default)]
+    hash: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -238,6 +250,16 @@ struct Player {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct ScoreInfo {
     mods_json: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct StorageOffsets {
+    base_path: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct WrappedStorageOffsets {
+    underlying_storage: usize,
 }
 
 #[derive(Clone)]
@@ -475,6 +497,8 @@ impl<'a> LazerReader<'a> {
             creator: "?".to_string(),
             status: BeatmapStatus::Unknown,
             mods: None,
+            osu_file_path: None,
+            songs_folder: None,
         };
 
         if self.game_base == 0 {
@@ -599,6 +623,8 @@ impl<'a> LazerReader<'a> {
 
         let mods = self.read_gameplay_mods();
 
+        let (osu_file_path, songs_folder) = self.read_beatmap_file_info(beatmap_info);
+
         Ok(BeatmapData {
             id,
             artist,
@@ -607,7 +633,62 @@ impl<'a> LazerReader<'a> {
             creator,
             status,
             mods,
+            osu_file_path,
+            songs_folder,
         })
+    }
+
+    fn read_beatmap_file_info(&self, beatmap_info: usize) -> (Option<String>, Option<String>) {
+        let hash = if self.offsets.beatmap_info.hash != 0 {
+            read_csharp_string(self.process, beatmap_info + self.offsets.beatmap_info.hash).ok()
+        } else {
+            None
+        };
+
+        let base_path = if self.offsets.osu_game_base.storage != 0 {
+            self.read_storage_base_path()
+        } else {
+            None
+        };
+
+        match (hash, base_path) {
+            (Some(h), Some(base)) if h.len() >= 2 => {
+                let file_path = format!("{}/{}/{}", &h[0..1], &h[0..2], &h);
+                let files_folder = format!("{}/files", base);
+                (Some(file_path), Some(files_folder))
+            }
+            _ => (None, None),
+        }
+    }
+
+    fn read_storage_base_path(&self) -> Option<String> {
+        let storage = self
+            .process
+            .read_ptr(self.game_base + self.offsets.osu_game_base.storage)
+            .ok()?;
+
+        if storage == 0 {
+            return None;
+        }
+
+        // unwrap WrappedStorage or return directly
+        let underlying = if self.offsets.wrapped_storage.underlying_storage != 0 {
+            self.process
+                .read_ptr(storage + self.offsets.wrapped_storage.underlying_storage)
+                .unwrap_or(storage)
+        } else {
+            storage
+        };
+
+        if underlying == 0 {
+            return None;
+        }
+
+        if self.offsets.storage.base_path != 0 {
+            read_csharp_string(self.process, underlying + self.offsets.storage.base_path).ok()
+        } else {
+            None
+        }
     }
 }
 

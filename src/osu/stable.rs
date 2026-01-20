@@ -4,19 +4,24 @@ use tokio::time::{self, Duration};
 
 use super::core::{
     BeatmapData, BeatmapStatus, GameplayMods, MemoryError, MemoryEvent, ModInfo, OsuCommand,
-    OsuStatus, ProcessMemory, order_mods, parse_pattern,
+    OsuStatus, ProcessMemory, DATA_POLLING_INTERVAL_MS, order_mods, parse_pattern,
 };
 use crate::{log_debug, log_error};
 
-const DATA_POLLING_INTERVAL_MS: u64 = 100;
-
 pub async fn run_stable_reader(
     pid: u32,
+    songs_folder: Option<String>,
     tx: &mut iced::futures::channel::mpsc::Sender<MemoryEvent>,
     cmd_rx: &mut iced::futures::channel::mpsc::Receiver<OsuCommand>,
     forward_tx: &mut iced::futures::channel::mpsc::Sender<MemoryEvent>,
     current_beatmap: &mut Option<BeatmapData>,
 ) -> Result<(), MemoryError> {
+    log_debug!(
+        "memory-stable",
+        "Starting stable reader with songs_folder: {:?}",
+        songs_folder
+    );
+
     let _ = tx
         .send(MemoryEvent::StatusChanged(OsuStatus::Initializing))
         .await;
@@ -54,7 +59,9 @@ pub async fn run_stable_reader(
                 };
 
                 match result {
-                    Ok(Ok(beatmap)) => {
+                    Ok(Ok(mut beatmap)) => {
+                        beatmap.songs_folder = songs_folder.clone();
+
                         let mods_changed =
                             current_beatmap.as_ref().map(|b| &b.mods) != Some(&beatmap.mods);
                         let beatmap_changed = last_beatmap_id != Some(beatmap.id);
@@ -135,6 +142,8 @@ struct BeatmapOffsets {
     difficulty: usize,
     map_id: usize,
     ranked_status: usize,
+    folder: usize,
+    file: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -319,6 +328,8 @@ impl<'a> StableReader<'a> {
             creator: "?".to_string(),
             status: BeatmapStatus::Unknown,
             mods: None,
+            osu_file_path: None,
+            songs_folder: None,
         };
 
         if self.base_addr == 0 {
@@ -391,6 +402,18 @@ impl<'a> StableReader<'a> {
         let creator = read_stable_string(self.process, beatmap + self.offsets.beatmap.creator)
             .unwrap_or_else(|_| "?".to_string());
 
+        let folder = read_stable_string(self.process, beatmap + self.offsets.beatmap.folder).ok();
+        let file = read_stable_string(self.process, beatmap + self.offsets.beatmap.file).ok();
+
+        let osu_file_path = match (folder, file) {
+            (Some(f), Some(n)) if !f.is_empty() && !n.is_empty() => {
+                use std::path::Path;
+                let path = Path::new(&f).join(&n);
+                path.to_str().map(|s| s.to_string())
+            }
+            _ => None,
+        };
+
         let mods = self.read_mods();
 
         Ok(BeatmapData {
@@ -401,6 +424,8 @@ impl<'a> StableReader<'a> {
             creator,
             status,
             mods,
+            osu_file_path,
+            songs_folder: None,
         })
     }
 }

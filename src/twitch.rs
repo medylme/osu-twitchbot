@@ -12,36 +12,17 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::osu::core::{MemoryEvent, OsuCommand};
+use crate::osu::pp::get_pp_spread;
+use crate::placeholders::Placeholders;
 use crate::{log_debug, log_error, log_info, log_warn};
 
 pub const DEFAULT_NP_COMMAND: &str = "!np";
 pub const DEFAULT_NP_FORMAT: &str =
     "{artist} - {title} [{diff}] ({creator}) {mods} | {status} {link}";
+pub const DEFAULT_PP_COMMAND: &str = "!pp";
+pub const DEFAULT_PP_FORMAT: &str =
+    "{mods} 95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp";
 const SOCKET_KEEPALIVE_SECONDS: u64 = 30;
-
-pub fn parse_beatmap_placeholders(beatmap: &crate::osu::core::BeatmapData, format: &str) -> String {
-    let mods_string = beatmap.mods.as_ref().map(|m| m.mods_string.clone());
-    let mods = mods_string
-        .as_ref()
-        .map(|m| format!("+{}", m))
-        .unwrap_or_default();
-
-    let link = if beatmap.id <= 0 {
-        String::new()
-    } else {
-        format!("https://osu.ppy.sh/b/{}", beatmap.id)
-    };
-
-    format
-        .replace("{id}", &beatmap.id.to_string())
-        .replace("{artist}", &beatmap.artist)
-        .replace("{title}", &beatmap.title)
-        .replace("{diff}", &beatmap.difficulty_name)
-        .replace("{creator}", &beatmap.creator)
-        .replace("{mods}", &mods)
-        .replace("{link}", &link)
-        .replace("{status}", &beatmap.status.to_string())
-}
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -71,11 +52,15 @@ pub enum TwitchCommand {
         token: String,
         np_command: String,
         np_format: String,
+        pp_command: String,
+        pp_format: String,
     },
     Disconnect,
     UpdatePreferences {
         np_command: Option<String>,
         np_format: Option<String>,
+        pp_command: Option<String>,
+        pp_format: Option<String>,
     },
 }
 
@@ -86,9 +71,15 @@ pub enum TwitchEvent {
     Error(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CommandType {
+    NowPlaying,
+    PerformancePoints,
+}
+
 struct PendingRequest {
     message_id: String,
+    command_type: CommandType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,25 +260,47 @@ struct Session {
     read: Arc<Mutex<SplitStream<WebSocketType>>>,
 }
 
-pub struct NpPreferences {
+pub struct ChatbotPreferences {
+    pub np: CommandConfig,
+    pub pp: CommandConfig,
+}
+
+pub(crate) struct CommandConfig {
     pub command: Arc<Mutex<String>>,
     pub format: Arc<Mutex<String>>,
 }
 
-impl NpPreferences {
-    pub fn new(command: String, format: String) -> Self {
+pub(crate) struct CommandConfigInit {
+    pub command: String,
+    pub format: String,
+}
+
+impl ChatbotPreferences {
+    pub fn new(np: CommandConfigInit, pp: CommandConfigInit) -> Self {
         Self {
-            command: Arc::new(Mutex::new(command)),
-            format: Arc::new(Mutex::new(format)),
+            np: CommandConfig {
+                command: Arc::new(Mutex::new(np.command)),
+                format: Arc::new(Mutex::new(np.format)),
+            },
+            pp: CommandConfig {
+                command: Arc::new(Mutex::new(pp.command)),
+                format: Arc::new(Mutex::new(pp.format)),
+            },
         }
     }
 }
 
-impl Default for NpPreferences {
+impl Default for ChatbotPreferences {
     fn default() -> Self {
         Self::new(
-            DEFAULT_NP_COMMAND.to_string(),
-            DEFAULT_NP_FORMAT.to_string(),
+            CommandConfigInit {
+                command: DEFAULT_NP_COMMAND.to_string(),
+                format: DEFAULT_NP_FORMAT.to_string(),
+            },
+            CommandConfigInit {
+                command: DEFAULT_PP_COMMAND.to_string(),
+                format: DEFAULT_PP_FORMAT.to_string(),
+            },
         )
     }
 }
@@ -298,7 +311,7 @@ pub struct TwitchClient {
     session: Session,
     access_token: String,
     http_client: reqwest::Client,
-    pub chatbot_preferences: NpPreferences,
+    pub chatbot_preferences: ChatbotPreferences,
 }
 
 impl TwitchClient {
@@ -306,6 +319,8 @@ impl TwitchClient {
         access_token: &str,
         np_command: String,
         np_format: String,
+        pp_command: String,
+        pp_format: String,
     ) -> Result<Self, BoxError> {
         log_debug!("twitch", "Creating new TwitchClient");
         let client_id = env!("TWITCH_CLIENT_ID");
@@ -325,20 +340,45 @@ impl TwitchClient {
             session,
             access_token: access_token.to_string(),
             http_client,
-            chatbot_preferences: NpPreferences::new(np_command, np_format),
+            chatbot_preferences: ChatbotPreferences::new(
+                CommandConfigInit {
+                    command: np_command,
+                    format: np_format,
+                },
+                CommandConfigInit {
+                    command: pp_command,
+                    format: pp_format,
+                },
+            ),
         })
     }
 
-    pub async fn update_preferences(&self, np_command: Option<String>, np_format: Option<String>) {
+    pub async fn update_preferences(
+        &self,
+        np_command: Option<String>,
+        np_format: Option<String>,
+        pp_command: Option<String>,
+        pp_format: Option<String>,
+    ) {
         if let Some(cmd) = np_command {
-            let mut command = self.chatbot_preferences.command.lock().await;
+            let mut command = self.chatbot_preferences.np.command.lock().await;
             *command = cmd;
             log_debug!("twitch", "Updated np_command to: {}", *command);
         }
         if let Some(fmt) = np_format {
-            let mut format = self.chatbot_preferences.format.lock().await;
+            let mut format = self.chatbot_preferences.np.format.lock().await;
             *format = fmt;
             log_debug!("twitch", "Updated np_format to: {}", *format);
+        }
+        if let Some(cmd) = pp_command {
+            let mut command = self.chatbot_preferences.pp.command.lock().await;
+            *command = cmd;
+            log_debug!("twitch", "Updated pp_command to: {}", *command);
+        }
+        if let Some(fmt) = pp_format {
+            let mut format = self.chatbot_preferences.pp.format.lock().await;
+            *format = fmt;
+            log_debug!("twitch", "Updated pp_format to: {}", *format);
         }
     }
 
@@ -472,8 +512,30 @@ impl TwitchClient {
                             log_debug!("twitch", "Received beatmap data response for: {} - {}", beatmap_data.artist, beatmap_data.title);
 
                             if let Some(request) = pending_request.take() {
-                                let format_template = self.chatbot_preferences.format.lock().await.clone();
-                                let message = self.format_np_message(&beatmap_data, &format_template);
+                                let message = match request.command_type {
+                                    CommandType::NowPlaying => {
+                                        let format_template = self.chatbot_preferences.np.format.lock().await.clone();
+                                        Placeholders::from_beatmap(&beatmap_data).apply_np(&format_template)
+                                    }
+                                    CommandType::PerformancePoints => {
+                                        let pp_format_template = self.chatbot_preferences.pp.format.lock().await.clone();
+                                        match get_pp_spread(
+                                            &beatmap_data.mods,
+                                            beatmap_data.osu_file_path.as_deref(),
+                                            beatmap_data.songs_folder.as_deref(),
+                                        ) {
+                                            Ok(pp_values) => {
+                                                Placeholders::from_beatmap(&beatmap_data)
+                                                    .with_pp(&pp_values)
+                                                    .apply_pp(&pp_format_template)
+                                            }
+                                            Err(e) => {
+                                                log_debug!("twitch", "PP not available: {}", e);
+                                                "PP calculation not available (beatmap file not found)".to_string()
+                                            }
+                                        }
+                                    }
+                                };
 
                                 if let Err(e) = self.send_chat_message(
                                     &self.user.id,
@@ -506,10 +568,6 @@ impl TwitchClient {
         }
     }
 
-    fn format_np_message(&self, beatmap: &crate::osu::core::BeatmapData, format: &str) -> String {
-        parse_beatmap_placeholders(beatmap, format)
-    }
-
     async fn handle_eventsub_message(
         &self,
         message: &str,
@@ -537,10 +595,19 @@ impl TwitchClient {
                         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
                     if let Some(event) = event_data {
-                        let command = self.chatbot_preferences.command.lock().await;
+                        let np_command = self.chatbot_preferences.np.command.lock().await.clone();
+                        let pp_command = self.chatbot_preferences.pp.command.lock().await.clone();
                         let text = event.message.text.trim();
 
-                        if text.starts_with(command.as_str()) {
+                        let command_type = if text.starts_with(&np_command) {
+                            Some(CommandType::NowPlaying)
+                        } else if text.starts_with(&pp_command) {
+                            Some(CommandType::PerformancePoints)
+                        } else {
+                            None
+                        };
+
+                        if let Some(cmd_type) = command_type {
                             let now = Instant::now();
 
                             // rate limiting
@@ -553,7 +620,12 @@ impl TwitchClient {
 
                             log_info!(
                                 "twitch",
-                                "Now playing request from {}",
+                                "{} request from {}",
+                                if cmd_type == CommandType::NowPlaying {
+                                    "Now playing"
+                                } else {
+                                    "PP"
+                                },
                                 event.chatter_user_name
                             );
 
@@ -564,6 +636,7 @@ impl TwitchClient {
                             } else {
                                 *pending_request = Some(PendingRequest {
                                     message_id: event.message_id.clone(),
+                                    command_type: cmd_type,
                                 });
                                 *last_command_time = Some(now);
                             }
@@ -632,7 +705,7 @@ impl TwitchClient {
             return Err(format!("Failed to send chat message: {}", error_text).into());
         }
 
-        log_info!("twitch", "Sent now playing response");
+        log_info!("twitch", "Sent response to channel '{}'", channel_id);
         Ok(())
     }
 }

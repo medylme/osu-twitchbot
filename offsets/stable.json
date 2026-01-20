@@ -17,14 +17,14 @@
     "hp": 52,
     "od": 56,
     "md5": 108,
+    "folder": 120,
     "creator": 124,
     "star_rating_ptr": 140,
+    "file": 144,
     "difficulty": 172,
     "map_id": 200,
     "set_id": 204,
-    "ranked_status": 300,
-    "folder": 116,
-    "file": 148
+    "ranked_status": 300
   },
   "ruleset": {
     "ptr_offset": 11,

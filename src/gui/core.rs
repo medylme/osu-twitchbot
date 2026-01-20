@@ -16,10 +16,12 @@ use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
 use crate::logging::{LogEntry, LogLevel};
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
+use crate::osu::pp::get_pp_spread;
+use crate::placeholders::Placeholders;
 use crate::preferences::PreferencesStore;
 use crate::twitch::{
-    DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, TwitchCommand, TwitchEvent, TwitchStatus,
-    parse_beatmap_placeholders,
+    DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT, TwitchCommand,
+    TwitchEvent, TwitchStatus,
 };
 use crate::{
     VERSION, get_osu_channel, get_twitch_channel, log_debug, log_error, log_info, log_warn,
@@ -48,6 +50,10 @@ pub enum Message {
     NpFormatChanged(String),
     ResetNpCommand,
     ResetNpFormat,
+    PpCommandChanged(String),
+    PpFormatChanged(String),
+    ResetPpCommand,
+    ResetPpFormat,
     OsuEvent(MemoryEvent),
     TwitchEvent(TwitchEvent),
     LogEvent(LogEntry),
@@ -64,7 +70,10 @@ pub struct State {
     auto_connect_value: bool,
     np_command: String,
     np_format: String,
+    pp_command: String,
+    pp_format: String,
     current_beatmap: Option<BeatmapData>,
+    cached_pp: Option<crate::osu::pp::PpValues>,
     osu_status: OsuStatus,
     osu_cmd_tx: mpsc::Sender<OsuCommand>,
     pub osu_cmd_rx: CommandReceiver<OsuCommand>,
@@ -106,6 +115,8 @@ impl State {
                 token: token_input_value.clone(),
                 np_command: DEFAULT_NP_COMMAND.to_string(),
                 np_format: DEFAULT_NP_FORMAT.to_string(),
+                pp_command: DEFAULT_PP_COMMAND.to_string(),
+                pp_format: DEFAULT_PP_FORMAT.to_string(),
             });
             TwitchStatus::Connecting
         } else {
@@ -119,7 +130,10 @@ impl State {
             auto_connect_value,
             np_command: DEFAULT_NP_COMMAND.to_string(),
             np_format: DEFAULT_NP_FORMAT.to_string(),
+            pp_command: DEFAULT_PP_COMMAND.to_string(),
+            pp_format: DEFAULT_PP_FORMAT.to_string(),
             current_beatmap: None,
+            cached_pp: None,
             osu_status: OsuStatus::default(),
             osu_cmd_tx,
             osu_cmd_rx,
@@ -291,51 +305,95 @@ impl State {
     }
 
     fn view_settings_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
-        let now_playing_header = text("Now Playing").size(14);
+        let np_header = text("Now Playing").size(14);
 
-        let command_label = text("Command:").size(12);
-        let command_input = text_input(DEFAULT_NP_COMMAND, &self.np_command)
+        let np_command_label = text("Command:").size(12);
+        let np_command_input = text_input(DEFAULT_NP_COMMAND, &self.np_command)
             .size(12)
             .width(50)
             .style(primary_text_input)
             .on_input(Message::NpCommandChanged);
-        let reset_command_btn = button(text("Reset").size(12))
+        let np_command_reset_btn = button(text("Reset").size(12))
             .style(primary_button)
             .on_press(Message::ResetNpCommand);
-        let command_row = row![command_label, command_input, reset_command_btn]
+        let np_command_row = row![np_command_label, np_command_input, np_command_reset_btn]
             .spacing(10)
             .align_y(Center);
 
-        let format_label = text("Message Format:").size(12);
-        let format_input = text_input(DEFAULT_NP_FORMAT, &self.np_format)
+        let np_format_label = text("Format:").size(12);
+        let np_format_input = text_input(DEFAULT_NP_FORMAT, &self.np_format)
             .size(12)
             .width(Fill)
             .style(primary_text_input)
             .on_input(Message::NpFormatChanged);
-        let reset_format_btn = button(text("Reset").size(12))
+        let np_format_reset_btn = button(text("Reset").size(12))
             .style(primary_button)
             .on_press(Message::ResetNpFormat);
-        let format_row = row![format_label, format_input, reset_format_btn]
+        let np_format_row = row![np_format_label, np_format_input, np_format_reset_btn]
             .spacing(10)
             .align_y(Center);
 
-        let format_help = text("Available placeholders: {artist}, {title}, {diff}, {creator}, {mods}, {link}, {status}")
+        let np_format_help = text("Available placeholders: {artist}, {title}, {diff}, {creator}, {mods}, {link}, {status}")
             .size(11)
             .color(p.text_secondary);
 
-        let format_preview = self.build_format_preview(p);
+        let np_format_preview = self.build_np_format_preview(p);
+
+        // PP Command section
+        let pp_header = text("Performance Points").size(14);
+
+        let pp_command_label = text("Command:").size(12);
+        let pp_command_input = text_input(DEFAULT_PP_COMMAND, &self.pp_command)
+            .size(12)
+            .width(50)
+            .style(primary_text_input)
+            .on_input(Message::PpCommandChanged);
+        let pp_command_reset_btn = button(text("Reset").size(12))
+            .style(primary_button)
+            .on_press(Message::ResetPpCommand);
+        let pp_command_row = row![pp_command_label, pp_command_input, pp_command_reset_btn]
+            .spacing(10)
+            .align_y(Center);
+
+        let pp_format_label = text("Format:").size(12);
+        let pp_format_input = text_input(DEFAULT_PP_FORMAT, &self.pp_format)
+            .size(12)
+            .width(Fill)
+            .style(primary_text_input)
+            .on_input(Message::PpFormatChanged);
+        let pp_format_reset_btn = button(text("Reset").size(12))
+            .style(primary_button)
+            .on_press(Message::ResetPpFormat);
+        let pp_format_row = row![pp_format_label, pp_format_input, pp_format_reset_btn]
+            .spacing(10)
+            .align_y(Center);
+
+        let pp_format_help =
+            text("Available placeholders: {mods}, {pp_95}, {pp_97}, {pp_98}, {pp_99}, {pp_100}")
+                .size(11)
+                .color(p.text_secondary);
+
+        let pp_format_preview = self.build_pp_format_preview(p);
 
         let settings_content = column![
-            now_playing_header,
-            command_row,
-            format_row,
-            format_help,
-            format_preview
+            np_header,
+            np_command_row,
+            np_format_row,
+            np_format_help,
+            np_format_preview,
+            container(text("")).height(15),
+            pp_header,
+            pp_command_row,
+            pp_format_row,
+            pp_format_help,
+            pp_format_preview
         ]
         .spacing(10)
         .padding(10);
 
-        container(settings_content).height(Fill).into()
+        scrollable(container(settings_content).width(Fill))
+            .height(Fill)
+            .into()
     }
 
     fn view_data_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
@@ -350,6 +408,14 @@ impl State {
                     None
                 } else {
                     Some(format!("https://osu.ppy.sh/b/{}", beatmap.id))
+                };
+
+                let pp_spread_text = match &self.cached_pp {
+                    Some(pp) => format!(
+                        "95%: {:.0} | 97%: {:.0} | 98%: {:.0} | 99%: {:.0} | 100%: {:.0}",
+                        pp.pp_95, pp.pp_97, pp.pp_98, pp.pp_99, pp.pp_100
+                    ),
+                    None => "N/A".to_string(),
                 };
 
                 let data_rows: Vec<(&str, String)> = vec![
@@ -367,6 +433,7 @@ impl State {
                     ("Creator", beatmap.creator.clone()),
                     ("Status", beatmap.status.to_string()),
                     ("Active Mods", mods_text),
+                    ("PP", pp_spread_text),
                 ];
 
                 let table = column(data_rows.into_iter().map(|(label, value)| {
@@ -466,22 +533,34 @@ impl State {
             .into()
     }
 
-    fn build_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
-        // use current beatmap data if available, otherwise use sample data
-        let preview_text = if let Some(beatmap) = &self.current_beatmap {
-            parse_beatmap_placeholders(beatmap, &self.np_format)
-        } else {
-            // sample data for preview when no beatmap is loaded
-            self.np_format
-                .replace("{artist}", "Artist")
-                .replace("{title}", "Title")
-                .replace("{diff}", "Difficulty")
-                .replace("{creator}", "Creator")
-                .replace("{mods}", "+HD")
-                .replace("{link}", "https://osu.ppy.sh/b/123456")
-                .replace("{status}", "Ranked")
-                .replace("{id}", "123456")
+    fn build_np_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
+        let placeholders = self
+            .current_beatmap
+            .as_ref()
+            .map(Placeholders::from_beatmap)
+            .unwrap_or_else(Placeholders::sample);
+
+        let preview_text = placeholders.apply_np(&self.np_format);
+
+        let preview_label = span::<String, Font>("Preview: ").color(p.text_secondary);
+        let preview_content = span::<String, Font>(preview_text).color(p.text_primary);
+
+        let preview_rich_text = rich_text![preview_label, preview_content].size(11);
+
+        container(preview_rich_text)
+            .padding(8)
+            .width(Fill)
+            .style(code_block_container)
+            .into()
+    }
+
+    fn build_pp_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
+        let placeholders = match (&self.current_beatmap, &self.cached_pp) {
+            (Some(beatmap), Some(pp)) => Placeholders::from_beatmap(beatmap).with_pp(pp),
+            _ => Placeholders::sample_pp(),
         };
+
+        let preview_text = placeholders.apply_pp(&self.pp_format);
 
         let preview_label = span::<String, Font>("Preview: ").color(p.text_secondary);
         let preview_content = span::<String, Font>(preview_text).color(p.text_primary);
@@ -576,6 +655,8 @@ impl State {
                     token,
                     np_command: self.np_command.clone(),
                     np_format: self.np_format.clone(),
+                    pp_command: self.pp_command.clone(),
+                    pp_format: self.pp_format.clone(),
                 }) {
                     log_error!("gui", "Failed to send connect command: {}", e);
                     self.twitch_status =
@@ -600,41 +681,99 @@ impl State {
                 self.token_saved = false;
             }
             Message::NpCommandChanged(value) => {
+                log_debug!("gui", "Changed np_command to {}", value);
                 self.np_command = value;
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
                         np_command: Some(self.np_command.clone()),
                         np_format: None,
+                        pp_command: None,
+                        pp_format: None,
                     });
             }
             Message::NpFormatChanged(value) => {
+                log_debug!("gui", "Changed np_format to {}", value);
                 self.np_format = value;
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
                         np_command: None,
                         np_format: Some(self.np_format.clone()),
+                        pp_command: None,
+                        pp_format: None,
                     });
             }
             Message::ResetNpCommand => {
-                log_debug!("gui", "Reset NP command");
+                log_debug!("gui", "Reset np_command to default");
                 self.np_command = DEFAULT_NP_COMMAND.to_string();
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
                         np_command: Some(self.np_command.clone()),
                         np_format: None,
+                        pp_command: None,
+                        pp_format: None,
                     });
             }
             Message::ResetNpFormat => {
-                log_debug!("gui", "Reset NP format");
+                log_debug!("gui", "Reset np_format to default");
                 self.np_format = DEFAULT_NP_FORMAT.to_string();
                 let _ = self
                     .twitch_cmd_tx
                     .try_send(TwitchCommand::UpdatePreferences {
                         np_command: None,
                         np_format: Some(self.np_format.clone()),
+                        pp_command: None,
+                        pp_format: None,
+                    });
+            }
+            Message::PpCommandChanged(value) => {
+                log_debug!("gui", "Changed pp_command to {}", value);
+                self.pp_command = value;
+                let _ = self
+                    .twitch_cmd_tx
+                    .try_send(TwitchCommand::UpdatePreferences {
+                        np_command: None,
+                        np_format: None,
+                        pp_command: Some(self.pp_command.clone()),
+                        pp_format: None,
+                    });
+            }
+            Message::PpFormatChanged(value) => {
+                log_debug!("gui", "Changed pp_format to {}", value);
+                self.pp_format = value;
+                let _ = self
+                    .twitch_cmd_tx
+                    .try_send(TwitchCommand::UpdatePreferences {
+                        np_command: None,
+                        np_format: None,
+                        pp_command: None,
+                        pp_format: Some(self.pp_format.clone()),
+                    });
+            }
+            Message::ResetPpCommand => {
+                log_debug!("gui", "Reset pp_command to default");
+                self.pp_command = DEFAULT_PP_COMMAND.to_string();
+                let _ = self
+                    .twitch_cmd_tx
+                    .try_send(TwitchCommand::UpdatePreferences {
+                        np_command: None,
+                        np_format: None,
+                        pp_command: Some(self.pp_command.clone()),
+                        pp_format: None,
+                    });
+            }
+            Message::ResetPpFormat => {
+                log_debug!("gui", "Reset pp_format to default");
+                self.pp_format = DEFAULT_PP_FORMAT.to_string();
+                let _ = self
+                    .twitch_cmd_tx
+                    .try_send(TwitchCommand::UpdatePreferences {
+                        np_command: None,
+                        np_format: None,
+                        pp_command: None,
+                        pp_format: Some(self.pp_format.clone()),
                     });
             }
             Message::OsuEvent(event) => match event {
@@ -653,6 +792,14 @@ impl State {
                     self.osu_status = status.clone();
                 }
                 MemoryEvent::BeatmapChanged(beatmap) => {
+                    self.cached_pp = beatmap.as_ref().and_then(|b| {
+                        get_pp_spread(
+                            &b.mods,
+                            b.osu_file_path.as_deref(),
+                            b.songs_folder.as_deref(),
+                        )
+                        .ok()
+                    });
                     self.current_beatmap = beatmap;
                 }
                 MemoryEvent::BeatmapDataResponse(_) => {}

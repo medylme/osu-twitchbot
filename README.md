@@ -32,8 +32,6 @@ When a viewer types one of your configured commands in chat, the bot responds wi
 
 ### Now Playing
 
-The Now Playing command supports these placeholders:
-
 | Placeholder | Description     |
 | ----------- | --------------- |
 | `{artist}`  | Song artist     |
@@ -51,7 +49,22 @@ Default:
 {artist} - {title} [{diff}] ({creator}) {mods} | {status} {link}
 ```
 
-Plan to add more commands in the future!
+### Performance Points
+
+| Placeholder | Description        |
+| ----------- | ------------------ |
+| `{mods}`    | Active mods        |
+| `{pp_95}`   | PP at 95% accuracy |
+| `{pp_97}`   | PP at 97% accuracy |
+| `{pp_98}`   | PP at 98% accuracy |
+| `{pp_99}`   | PP at 99% accuracy |
+| `{pp_100}`  | PP at 100% (SS)    |
+
+Default:
+
+```
+{mods} 95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp
+```
 
 ## Building from Source
 

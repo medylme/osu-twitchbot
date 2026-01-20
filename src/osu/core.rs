@@ -4,6 +4,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::log_debug;
+
+pub const DATA_POLLING_INTERVAL_MS: u64 = 100;
+
 #[derive(Debug, Clone)]
 pub enum OsuCommand {
     RequestBeatmapData,
@@ -125,6 +129,8 @@ pub struct BeatmapData {
     pub creator: String,
     pub status: BeatmapStatus,
     pub mods: Option<GameplayMods>,
+    pub osu_file_path: Option<String>,
+    pub songs_folder: Option<String>,
 }
 
 #[cfg(windows)]
@@ -390,6 +396,7 @@ pub struct DetectedProcess {
     pub client: OsuClient,
     pub pid: u32,
     pub version: Option<String>,
+    pub songs_folder: Option<String>,
 }
 
 pub fn detect_osu_processes() -> Vec<DetectedProcess> {
@@ -432,12 +439,42 @@ pub fn detect_osu_processes() -> Vec<DetectedProcess> {
             None
         };
 
+        if !is_lazer {
+            log_debug!(
+                "process",
+                "Detected osu! stable at exe_path: {:?}",
+                exe_path
+            );
+        }
+
+        let songs_folder = if !is_lazer {
+            let folder = exe_path.and_then(|p| p.parent()).map(|p| p.join("Songs"));
+
+            if let Some(ref path) = folder
+                && !path.exists()
+            {
+                log_debug!(
+                    "process",
+                    "Songs folder does not exist at expected path: {:?}",
+                    path
+                );
+            }
+
+            folder
+                .filter(|p| p.exists())
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+        } else {
+            // for lazer we handle this through memory
+            None
+        };
+
         let index = if is_lazer { 1 } else { 0 };
         if !found[index] {
             result.push(DetectedProcess {
                 client,
                 pid: pid.as_u32(),
                 version,
+                songs_folder,
             });
             found[index] = true;
         }

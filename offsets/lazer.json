@@ -1,5 +1,5 @@
 {
-  "2026.102.1": {
+  "2026.119.0": {
     "patterns": {
       "base": "00 00 80 44 00 00 40 44 00 00 00 00 ?? ?? ?? ?? 00 00 00 00"
     },
@@ -19,7 +19,8 @@
       "stack": 800
     },
     "osu_game_base": {
-      "beatmap": 1104
+      "beatmap": 1104,
+      "storage": 1088
     },
     "working_beatmap": {
       "beatmap_info": 8
@@ -28,7 +29,8 @@
       "online_id": 140,
       "metadata": 48,
       "difficulty_name": 24,
-      "status": 136
+      "status": 136,
+      "hash": 80
     },
     "beatmap_metadata": {
       "title": 24,
@@ -43,6 +45,12 @@
     },
     "score_info": {
       "mods_json": 80
+    },
+    "storage": {
+      "base_path": 8
+    },
+    "wrapped_storage": {
+      "underlying_storage": 16
     }
   }
 }
