@@ -148,3 +148,15 @@ pub fn is_auto_update_enabled() -> bool {
 pub fn set_auto_update_enabled(enabled: bool) {
     let _ = AUTO_UPDATE_ENABLED.set(enabled);
 }
+
+pub fn get_releases_url() -> Option<String> {
+    let api_url = GITHUB_LATEST_RELEASE_URL?;
+
+    if let Some(repos_part) = api_url.strip_prefix("https://api.github.com/repos/")
+        && let Some(owner_repo) = repos_part.strip_suffix("/releases/latest")
+    {
+        return Some(format!("https://github.com/{}/releases/tag", owner_repo));
+    }
+
+    None
+}

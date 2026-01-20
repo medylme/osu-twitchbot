@@ -2,9 +2,7 @@ use std::io::{Write, stdin, stdout};
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-use super::core::UpdateError;
-
-const RELEASES_URL: &str = "https://github.com/medylme/osu-twitchbot/releases/tag";
+use super::core::{UpdateError, get_releases_url};
 
 #[cfg(all(target_os = "windows", not(debug_assertions)))]
 fn alloc_console() {
@@ -38,9 +36,13 @@ fn prompt_open_release(
     if stdin().read_line(&mut input).is_ok() {
         let input = input.trim().to_lowercase();
         if input.is_empty() || input == "y" || input == "yes" {
-            let url = format!("{}/{}", RELEASES_URL, tag);
-            if open::that(&url).is_err() {
-                println!("Failed to open browser. Visit: {}", url);
+            if let Some(releases_url) = get_releases_url() {
+                let url = format!("{}/{}", releases_url, tag);
+                if open::that(&url).is_err() {
+                    println!("Failed to open browser. Visit: {}", url);
+                }
+            } else {
+                println!("Release URL could not be determined.");
             }
         }
     }
