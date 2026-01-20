@@ -77,6 +77,15 @@ enum CommandType {
     PerformancePoints,
 }
 
+impl Display for CommandType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommandType::NowPlaying => write!(f, "np"),
+            CommandType::PerformancePoints => write!(f, "pp"),
+        }
+    }
+}
+
 struct PendingRequest {
     message_id: String,
     command_type: CommandType,
@@ -530,8 +539,8 @@ impl TwitchClient {
                                                     .apply_pp(&pp_format_template)
                                             }
                                             Err(e) => {
-                                                log_debug!("twitch", "PP not available: {}", e);
-                                                "PP calculation not available (beatmap file not found)".to_string()
+                                                log_debug!("twitch", "pp not available: {}", e);
+                                                "pp calculation currently not available".to_string()
                                             }
                                         }
                                     }
@@ -618,14 +627,10 @@ impl TwitchClient {
                                 return Ok(());
                             }
 
-                            log_info!(
+                            log_debug!(
                                 "twitch",
-                                "{} request from {}",
-                                if cmd_type == CommandType::NowPlaying {
-                                    "Now playing"
-                                } else {
-                                    "PP"
-                                },
+                                "Received {} request from {}",
+                                cmd_type,
                                 event.chatter_user_name
                             );
 
@@ -705,7 +710,7 @@ impl TwitchClient {
             return Err(format!("Failed to send chat message: {}", error_text).into());
         }
 
-        log_info!("twitch", "Sent response to channel '{}'", channel_id);
+        log_debug!("twitch", "Sent response to channel '{}'", channel_id);
         Ok(())
     }
 }

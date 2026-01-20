@@ -160,6 +160,10 @@ fn osu_worker() -> impl iced::futures::Stream<Item = MemoryEvent> {
                             let _ = tx.send(event.clone()).await;
                             let _ = forward_tx.send(event).await;
                         }
+                        OsuCommand::UpdateEventForwardSender(new_sender) => {
+                            forward_tx = new_sender;
+                            log_debug!("osu", "Updated event forward sender");
+                        }
                     }
                 }
 
@@ -256,20 +260,21 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
 
                             match subscribe_result {
                                 Ok(()) => {
-                                    let (_, forward_rx_holder) = get_osu_event_forward();
-                                    let osu_event_rx = forward_rx_holder.lock().unwrap().take();
+                                    // create a new channel and update the osu worker with it
+                                    let (new_forward_tx, osu_event_rx) =
+                                        mpsc::channel::<MemoryEvent>(10);
 
-                                    if osu_event_rx.is_none() {
+                                    let mut osu_tx_for_update = osu_tx.clone();
+                                    if let Err(e) = osu_tx_for_update
+                                        .send(OsuCommand::UpdateEventForwardSender(new_forward_tx))
+                                        .await
+                                    {
                                         log_warn!(
                                             "twitch",
-                                            "osu event forward channel already taken!"
+                                            "Failed to update osu event forward sender: {}",
+                                            e
                                         );
                                     }
-
-                                    let osu_event_rx = osu_event_rx.unwrap_or_else(|| {
-                                        let (_, rx) = mpsc::channel::<MemoryEvent>(10);
-                                        rx
-                                    });
 
                                     let osu_tx_clone = osu_tx.clone();
                                     let mut tx_clone = tx.clone();
