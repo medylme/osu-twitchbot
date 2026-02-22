@@ -39,10 +39,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
 
 fn main() -> iced::Result {
-    const SENTRY_DSN: Option<&'static str> = option_env!("SENTRY_DSN");
-    if let Some(sentry_url) = SENTRY_DSN {
-        let _guard = sentry::init((
-            sentry_url,
+    let sentry_dsn = option_env!("SENTRY_DSN");
+    let _guard = sentry_dsn.map(|dsn| {
+        sentry::init((
+            dsn,
             sentry::ClientOptions {
                 release: sentry::release_name!(),
                 environment: Some(std::borrow::Cow::Borrowed(if cfg!(debug_assertions) {
@@ -50,14 +50,14 @@ fn main() -> iced::Result {
                 } else {
                     "production"
                 })),
-                attach_stacktrace: true,
                 send_default_pii: true,
                 auto_session_tracking: true,
                 session_mode: sentry::SessionMode::Application,
+                attach_stacktrace: true,
                 ..Default::default()
             },
-        ));
-    }
+        ))
+    });
 
     set_auto_update_enabled(args_auto_update());
     set_theme_override(args_theme_override());
