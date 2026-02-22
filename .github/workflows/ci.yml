@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config gcc-mingw-w64-x86-64 musl-tools
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-musl, x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Write .env
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+        run: |
+          echo "TWITCH_CLIENT_ID=${TWITCH_CLIENT_ID}" > .env
+          echo "GITHUB_LATEST_RELEASE_URL=https://api.github.com/repos/${{ github.repository }}/releases/latest" >> .env
+
+      - name: Check (Linux)
+        run: cargo check --target x86_64-unknown-linux-musl
+
+      - name: Check (Windows)
+        run: cargo check --target x86_64-pc-windows-gnu
+
+      - name: Clippy (Linux)
+        run: cargo clippy --target x86_64-unknown-linux-musl -- -W clippy::pedantic
+
+      - name: Clippy (Windows)
+        run: cargo clippy --target x86_64-pc-windows-gnu -- -W clippy::pedantic
+
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Test
+        run: cargo test

@@ -1,0 +1,42 @@
+{
+  "patterns": {
+    "base": "F8 01 74 04 83 65",
+    "ruleset": "C7 86 48 01 00 00 01 00 00 00 A1",
+    "menu_mods": "C8 FF ?? ?? ?? ?? ?? 81 0D ?? ?? ?? ?? 00 08 00 00"
+  },
+  "menu_mods": {
+    "offset": 9
+  },
+  "status": {
+    "base_offset": -60
+  },
+  "base": {
+    "beatmap_ptr": -12
+  },
+  "beatmap": {
+    "artist": 24,
+    "title": 36,
+    "ar": 44,
+    "cs": 48,
+    "hp": 52,
+    "od": 56,
+    "md5": 108,
+    "folder": 120,
+    "creator": 124,
+    "star_rating_ptr": 140,
+    "file": 144,
+    "difficulty": 172,
+    "map_id": 200,
+    "set_id": 204,
+    "ranked_status": 300
+  },
+  "ruleset": {
+    "ptr_offset": 11,
+    "ptr_deref_offset": 4,
+    "play_container": 104,
+    "mods_base": 56,
+    "mods_ptr": 28,
+    "mods_xor1": 8,
+    "mods_xor2": 12
+  }
+}
