@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use chrono::Local;
 use iced::futures::channel::mpsc;
 use owo_colors::OwoColorize;
+use sentry::Level;
 
 use crate::VERSION;
 
@@ -112,7 +113,30 @@ pub fn log_warn(module: &str, message: String) {
     log(LogLevel::Warn, module, message);
 }
 
-pub fn log_error(module: &str, message: String) {
+fn report_error_to_sentry(log_module: &str, message: &str) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    sentry::with_scope(
+        |scope| {
+            scope.set_tag("log_module", log_module);
+        },
+        || {
+            sentry::capture_message(message, Level::Error);
+        },
+    );
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportToSentry {
+    Yes,
+    No,
+}
+
+pub fn log_error(module: &str, message: String, report_to_sentry: ReportToSentry) {
+    if matches!(report_to_sentry, ReportToSentry::Yes) {
+        report_error_to_sentry(module, &message);
+    }
     log(LogLevel::Error, module, message);
 }
 
@@ -139,7 +163,7 @@ macro_rules! log_warn {
 
 #[macro_export]
 macro_rules! log_error {
-    ($module:literal, $($arg:tt)*) => {
-        $crate::logging::log_error($module, format!($($arg)*));
+    ($module:literal, $sentry:expr, $($arg:tt)*) => {
+        $crate::logging::log_error($module, format!($($arg)*), $sentry);
     };
 }

@@ -8,6 +8,7 @@ use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods, MemoryError, MemoryEvent,
     ModInfo, OsuCommand, OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint,
 };
+use crate::logging::ReportToSentry;
 use crate::{log_debug, log_error, log_info, log_warn};
 
 fn get_latest_version(offsets_map: &HashMap<String, Offsets>) -> Option<&str> {
@@ -42,7 +43,12 @@ pub async fn run_lazer_reader(
     let all_offsets_json = include_str!("../../offsets/lazer.json");
     let offsets_map: HashMap<String, Offsets> =
         serde_json::from_str(all_offsets_json).map_err(|e| {
-            log_error!("memory-lazer", "Failed to parse offsets file: {}", e);
+            log_error!(
+                "memory-lazer",
+                ReportToSentry::Yes,
+                "Failed to parse offsets file: {}",
+                e
+            );
             MemoryError::ReadFailed(format!("Failed to parse offsets: {}", e))
         })?;
 
@@ -302,15 +308,25 @@ impl<'a> LazerReader<'a> {
         offsets_json: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let offsets: Offsets = serde_json::from_str(offsets_json).map_err(|e| {
-            log_error!("memory-lazer", "Failed to parse offsets JSON: {}", e);
+            log_error!(
+                "memory-lazer",
+                ReportToSentry::Yes,
+                "Failed to parse offsets JSON: {}",
+                e
+            );
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         let process = match ProcessMemory::new(pid) {
             Ok(p) => p,
             Err(e) => {
-                log_error!("memory-lazer", "Failed to open process: {}", e);
-                log_error!("memory-lazer", "{}", privilege_hint());
+                log_error!(
+                    "memory-lazer",
+                    ReportToSentry::No,
+                    "Failed to open process: {}",
+                    e
+                );
+                log_error!("memory-lazer", ReportToSentry::No, "{}", privilege_hint());
                 return Err(Box::new(e));
             }
         };
@@ -325,7 +341,12 @@ impl<'a> LazerReader<'a> {
                 addr
             }
             Err(e) => {
-                log_error!("memory-lazer", "Failed to find pattern: {}", e);
+                log_error!(
+                    "memory-lazer",
+                    ReportToSentry::Yes,
+                    "Failed to find pattern: {}",
+                    e
+                );
                 return Err(Box::new(e));
             }
         };
@@ -340,16 +361,26 @@ impl<'a> LazerReader<'a> {
         let external_link_opener = match process.read_ptr(external_link_opener_addr) {
             Ok(ptr) => {
                 if ptr == 0 {
-                    log_error!("memory-lazer", "ExternalLinkOpener pointer is null");
+                    log_error!(
+                        "memory-lazer",
+                        ReportToSentry::Yes,
+                        "ExternalLinkOpener pointer is null"
+                    );
                     return Err("ExternalLinkOpener pointer is null".into());
                 }
                 log_debug!("memory-lazer", "ExternalLinkOpener value: 0x{:X}", ptr);
                 ptr
             }
             Err(e) => {
-                log_error!("memory-lazer", "Failed to read ExternalLinkOpener: {}", e);
                 log_error!(
                     "memory-lazer",
+                    ReportToSentry::Yes,
+                    "Failed to read ExternalLinkOpener: {}",
+                    e
+                );
+                log_error!(
+                    "memory-lazer",
+                    ReportToSentry::Yes,
                     "This might mean the pattern offset is incorrect."
                 );
                 return Err(Box::new(e));
@@ -361,14 +392,19 @@ impl<'a> LazerReader<'a> {
         let api = match process.read_ptr(api_ptr_addr) {
             Ok(ptr) => {
                 if ptr == 0 {
-                    log_error!("memory-lazer", "API pointer is null");
+                    log_error!("memory-lazer", ReportToSentry::Yes, "API pointer is null");
                     return Err("API pointer is null".into());
                 }
                 log_debug!("memory-lazer", "API value: 0x{:X}", ptr);
                 ptr
             }
             Err(e) => {
-                log_error!("memory-lazer", "Failed to read API: {}", e);
+                log_error!(
+                    "memory-lazer",
+                    ReportToSentry::Yes,
+                    "Failed to read API: {}",
+                    e
+                );
                 return Err(Box::new(e));
             }
         };
@@ -382,7 +418,11 @@ impl<'a> LazerReader<'a> {
         let game_base = match process.read_ptr(game_base_addr) {
             Ok(ptr) => {
                 if ptr == 0 {
-                    log_error!("memory-lazer", "Game base pointer is null");
+                    log_error!(
+                        "memory-lazer",
+                        ReportToSentry::Yes,
+                        "Game base pointer is null"
+                    );
                     return Err("Game base pointer is null".into());
                 }
                 log_debug!("memory-lazer", "Game base value: 0x{:X}", ptr);
@@ -397,7 +437,12 @@ impl<'a> LazerReader<'a> {
                 ptr
             }
             Err(e) => {
-                log_error!("memory-lazer", "Failed to read game base: {}", e);
+                log_error!(
+                    "memory-lazer",
+                    ReportToSentry::Yes,
+                    "Failed to read game base: {}",
+                    e
+                );
                 return Err(Box::new(e));
             }
         };

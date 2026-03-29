@@ -6,6 +6,7 @@ use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods, MemoryError, MemoryEvent,
     ModInfo, OsuCommand, OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint,
 };
+use crate::logging::ReportToSentry;
 use crate::{log_debug, log_error};
 
 pub async fn run_stable_reader(
@@ -182,15 +183,25 @@ impl<'a> StableReader<'a> {
         offsets_json: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let offsets: Offsets = serde_json::from_str(offsets_json).map_err(|e| {
-            log_error!("memory-stable", "Failed to parse offsets JSON: {}", e);
+            log_error!(
+                "memory-stable",
+                ReportToSentry::Yes,
+                "Failed to parse offsets JSON: {}",
+                e
+            );
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         let process = match ProcessMemory::new(pid) {
             Ok(p) => p,
             Err(e) => {
-                log_error!("memory-stable", "Failed to open process: {}", e);
-                log_error!("memory-stable", "{}", privilege_hint());
+                log_error!(
+                    "memory-stable",
+                    ReportToSentry::No,
+                    "Failed to open process: {}",
+                    e
+                );
+                log_error!("memory-stable", ReportToSentry::No, "{}", privilege_hint());
                 return Err(Box::new(e));
             }
         };
@@ -204,7 +215,12 @@ impl<'a> StableReader<'a> {
                 addr
             }
             Err(e) => {
-                log_error!("memory-stable", "Failed to find base pattern: {}", e);
+                log_error!(
+                    "memory-stable",
+                    ReportToSentry::Yes,
+                    "Failed to find base pattern: {}",
+                    e
+                );
                 return Err(Box::new(e));
             }
         };
@@ -218,7 +234,12 @@ impl<'a> StableReader<'a> {
                 addr
             }
             Err(e) => {
-                log_error!("memory-stable", "Failed to find ruleset pattern: {}", e);
+                log_error!(
+                    "memory-stable",
+                    ReportToSentry::Yes,
+                    "Failed to find ruleset pattern: {}",
+                    e
+                );
                 return Err(Box::new(e));
             }
         };
@@ -232,7 +253,12 @@ impl<'a> StableReader<'a> {
                 addr
             }
             Err(e) => {
-                log_error!("memory-stable", "Failed to find menu mods pattern: {}", e);
+                log_error!(
+                    "memory-stable",
+                    ReportToSentry::Yes,
+                    "Failed to find menu mods pattern: {}",
+                    e
+                );
                 return Err(Box::new(e));
             }
         };
