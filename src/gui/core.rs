@@ -20,8 +20,9 @@ use crate::osu::pp::get_pp_spread;
 use crate::placeholders::Placeholders;
 use crate::preferences::PreferencesStore;
 use crate::twitch::{
-    DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT, TwitchCommand,
-    TwitchEvent, TwitchStatus,
+    DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT,
+    INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
+    is_invalid_access_token_error,
 };
 use crate::{
     VERSION, get_osu_channel, get_twitch_channel, log_debug, log_error, log_info, log_warn,
@@ -844,7 +845,12 @@ impl State {
                 }
                 TwitchEvent::Error(ref e) => {
                     log_error!("twitch", "Connection error: {}", e);
-                    self.twitch_status = TwitchStatus::Error(e.clone());
+                    let status_msg = if is_invalid_access_token_error(e) {
+                        INVALID_ACCESS_TOKEN_STATUS.to_string()
+                    } else {
+                        e.clone()
+                    };
+                    self.twitch_status = TwitchStatus::Error(status_msg);
                 }
             },
             Message::LogEvent(entry) => {

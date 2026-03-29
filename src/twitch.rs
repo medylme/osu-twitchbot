@@ -46,6 +46,12 @@ impl Display for TwitchStatus {
     }
 }
 
+pub const INVALID_ACCESS_TOKEN_STATUS: &str = "Please regenerate your token!";
+
+pub fn is_invalid_access_token_error(message: &str) -> bool {
+    message.contains("Invalid OAuth token")
+}
+
 #[derive(Debug, Clone)]
 pub enum TwitchCommand {
     Connect {
@@ -200,6 +206,17 @@ pub struct Reply {
 #[derive(Debug, Deserialize)]
 struct TwitchResponse {
     data: Vec<TwitchUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HelixErrorBody {
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    status: Option<u16>,
+    #[serde(default)]
+    message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -796,20 +813,49 @@ async fn get_user_id_from_access_token(
     access_token: &str,
 ) -> Result<TwitchUser, BoxError> {
     log_debug!("twitch", "Getting user data from access token");
-    let response: TwitchResponse = http_client
+    let response = http_client
         .get("https://api.twitch.tv/helix/users")
         .header("Authorization", format!("Bearer {}", access_token))
         .header("Client-Id", client_id)
         .send()
-        .await?
-        .json()
         .await?;
 
-    if let Some(user) = response.data.first() {
+    let status = response.status();
+    let body = response.text().await?;
+
+    if !status.is_success() {
+        let detail = serde_json::from_str::<HelixErrorBody>(&body).ok();
+        let msg = match detail {
+            Some(e) => {
+                let mut parts = Vec::new();
+                if let Some(m) = e.message.filter(|s| !s.is_empty()) {
+                    parts.push(m);
+                } else if let Some(err) = e.error.filter(|s| !s.is_empty()) {
+                    parts.push(err);
+                }
+                if parts.is_empty() {
+                    body
+                } else {
+                    parts.join(": ")
+                }
+            }
+            None => body,
+        };
+        return Err(format!("Twitch API {}: {}", status, msg).into());
+    }
+
+    let parsed: TwitchResponse = serde_json::from_str(&body).map_err(|e| {
+        format!(
+            "Unexpected Twitch /users response ({}): {} — body: {}",
+            status, e, body
+        )
+    })?;
+
+    if let Some(user) = parsed.data.first() {
         log_debug!("twitch", "Got user: {}", user.display_name);
         Ok(user.clone())
     } else {
         log_debug!("twitch", "No user data in response");
-        Err("Failed to get user data".into())
+        Err("Failed to get user data (empty data array)".into())
     }
 }
