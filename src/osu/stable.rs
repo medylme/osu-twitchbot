@@ -159,7 +159,7 @@ struct BeatmapOffsets {
 
 #[derive(Debug, Deserialize, Clone)]
 struct RulesetOffsets {
-    ptr_offset: usize,
+    ptr_offset: isize,
     ptr_deref_offset: usize,
     play_container: usize,
     mods_base: usize,
@@ -314,7 +314,8 @@ impl<'a> StableReader<'a> {
             return self.read_menu_mods();
         }
 
-        let ruleset_ptr_addr = self.ruleset_addr + self.offsets.ruleset.ptr_offset;
+        let ruleset_ptr_addr =
+            (self.ruleset_addr as isize + self.offsets.ruleset.ptr_offset) as usize;
         let ruleset_ptr = self.process.read_ptr32(ruleset_ptr_addr).ok()?;
         if ruleset_ptr == 0 {
             return None;
