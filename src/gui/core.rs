@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use iced::Alignment::Center;
@@ -81,7 +82,7 @@ pub struct State {
     twitch_status: TwitchStatus,
     twitch_cmd_tx: mpsc::Sender<TwitchCommand>,
     pub twitch_cmd_rx: CommandReceiver<TwitchCommand>,
-    log_entries: Vec<LogEntry>,
+    log_entries: VecDeque<LogEntry>,
 }
 
 impl State {
@@ -146,7 +147,7 @@ impl State {
             twitch_status,
             twitch_cmd_tx,
             twitch_cmd_rx,
-            log_entries: Vec::new(),
+            log_entries: VecDeque::new(),
         }
     }
 
@@ -869,10 +870,10 @@ impl State {
                 }
             },
             Message::LogEvent(entry) => {
-                self.log_entries.push(entry);
+                self.log_entries.push_back(entry);
                 // clamp amount of log entries
                 if self.log_entries.len() > MAX_LOG_ENTRIES {
-                    self.log_entries.remove(0);
+                    self.log_entries.pop_front();
                 }
             }
             Message::LinkClicked(url) => {
