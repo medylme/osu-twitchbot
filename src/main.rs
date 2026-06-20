@@ -62,9 +62,12 @@ fn main() -> iced::Result {
     set_theme_override(args_theme_override());
 
     #[cfg(not(debug_assertions))]
-    if is_auto_update_enabled() {
+    {
+        // runs even with --no-update so a stale .old backup never lingers
         updater::install::cleanup_old_binary();
-        let _ = updater::splash::run_startup_update_check();
+        if is_auto_update_enabled() {
+            let _ = updater::splash::run_startup_update_check();
+        }
     }
 
     log_info!("main", "Starting osu-twitchbot");
