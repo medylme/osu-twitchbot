@@ -34,13 +34,14 @@ use twitch::{TwitchClient, TwitchCommand, TwitchEvent, is_invalid_access_token_e
 use updater::core::is_auto_update_enabled;
 use updater::core::set_auto_update_enabled;
 
-pub const APP_NAME: &str = "dyl-osu-twitchbot";
+pub const APP_NAME: &str = "osu-twitchbot";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
 
 fn main() -> iced::Result {
-    // only enable sentry in release builds
-    let _guard = cfg!(not(debug_assertions))
+    let telemetry_enabled = preferences::PreferencesStore::load_or_default().telemetry_enabled();
+
+    let _guard = (cfg!(not(debug_assertions)) && telemetry_enabled)
         .then(|| option_env!("SENTRY_DSN"))
         .flatten()
         .map(|dsn| {
@@ -49,7 +50,7 @@ fn main() -> iced::Result {
                 sentry::ClientOptions {
                     release: sentry::release_name!(),
                     environment: Some(std::borrow::Cow::Borrowed("production")),
-                    send_default_pii: true,
+                    send_default_pii: false,
                     auto_session_tracking: true,
                     session_mode: sentry::SessionMode::Application,
                     attach_stacktrace: true,

@@ -8,6 +8,8 @@ use crate::twitch::{DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, D
 
 use super::{APP_NAME, VERSION};
 
+const CONFIG_NAME: &str = "settings";
+
 #[derive(Debug, Error)]
 pub enum PreferencesError {
     #[error("Failed to access preferences: {0}")]
@@ -15,6 +17,7 @@ pub enum PreferencesError {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     version: String,
     auto_connect: bool,
@@ -22,6 +25,7 @@ pub struct Config {
     np_format: String,
     pp_command: String,
     pp_format: String,
+    telemetry_enabled: bool,
 }
 
 impl Default for Config {
@@ -33,6 +37,7 @@ impl Default for Config {
             np_format: DEFAULT_NP_FORMAT.to_string(),
             pp_command: DEFAULT_PP_COMMAND.to_string(),
             pp_format: DEFAULT_PP_FORMAT.to_string(),
+            telemetry_enabled: true,
         }
     }
 }
@@ -43,7 +48,7 @@ pub struct PreferencesStore {
 
 impl PreferencesStore {
     fn load() -> Result<Self, PreferencesError> {
-        let config: Config = confy::load(APP_NAME, None)?;
+        let config: Config = confy::load(APP_NAME, CONFIG_NAME)?;
         Ok(Self { config })
     }
 
@@ -61,7 +66,7 @@ impl PreferencesStore {
     }
 
     fn backup_config() {
-        if let Ok(config_path) = confy::get_configuration_file_path(APP_NAME, None)
+        if let Ok(config_path) = confy::get_configuration_file_path(APP_NAME, CONFIG_NAME)
             && config_path.exists()
         {
             let backup_path = config_path.with_extension("toml.bak");
@@ -78,12 +83,16 @@ impl PreferencesStore {
     }
 
     pub fn save(&self) -> Result<(), PreferencesError> {
-        confy::store(APP_NAME, None, &self.config)?;
+        confy::store(APP_NAME, CONFIG_NAME, &self.config)?;
         Ok(())
     }
 
     pub fn auto_connect(&self) -> bool {
         self.config.auto_connect
+    }
+
+    pub fn telemetry_enabled(&self) -> bool {
+        self.config.telemetry_enabled
     }
 
     pub fn np_command(&self) -> &str {
