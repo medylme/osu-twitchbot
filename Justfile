@@ -1,7 +1,7 @@
 target_dir := env("TARGET_DIR", "target")
 dist_dir := env("DIST_DIR", "dist")
 windows_target := "x86_64-pc-windows-gnu"
-linux_target := "x86_64-unknown-linux-musl"
+linux_target := "x86_64-unknown-linux-gnu"
 
 name := `cargo metadata --format-version 1 --no-deps 2>/dev/null | jq -r '.packages[0].name'`
 
@@ -51,7 +51,7 @@ build-win: _ensure-dist
     cp "{{target_dir}}/{{windows_target}}/debug/{{name}}.exe" "{{dist_dir}}/debug/{{name}}-windows-x86_64-debug.exe"
 
 build-linux: _ensure-dist
-    cross build --target {{linux_target}} --target-dir "{{target_dir}}"
+    cargo build --target {{linux_target}} --target-dir "{{target_dir}}"
     cp "{{target_dir}}/{{linux_target}}/debug/{{name}}" "{{dist_dir}}/debug/{{name}}-linux-x86_64-debug"
 
 # builds - release
@@ -66,7 +66,7 @@ dist-win: _ensure-dist
     @echo "Built: {{dist_dir}}/{{name}}-windows-x86_64.exe"
 
 dist-linux: _ensure-dist
-    cross build --target {{linux_target}} --target-dir "{{target_dir}}" --release
+    cargo build --target {{linux_target}} --target-dir "{{target_dir}}" --release
     cp "{{target_dir}}/{{linux_target}}/release/{{name}}" "{{dist_dir}}/release/{{name}}-linux-x86_64"
     @echo "Built: {{dist_dir}}/{{name}}-linux-x86_64"
 

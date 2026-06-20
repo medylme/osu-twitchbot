@@ -3710,7 +3710,6 @@ dependencies = [
  "keyring",
  "libc",
  "open",
- "openssl",
  "owo-colors",
  "reqwest",
  "rosu-pp",
