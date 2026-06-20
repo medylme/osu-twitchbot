@@ -60,6 +60,7 @@ pub enum Message {
     TwitchEvent(TwitchEvent),
     LogEvent(LogEntry),
     LinkClicked(String),
+    OpenLogsClicked,
 }
 
 const MAX_LOG_ENTRIES: usize = 500;
@@ -532,11 +533,19 @@ impl State {
             scrollable(log_column).height(Fill).width(Fill).into()
         };
 
-        container(inner_content)
+        let log_box = container(inner_content)
             .height(Fill)
             .width(Fill)
             .padding(10)
-            .style(code_block_container)
+            .style(code_block_container);
+
+        let open_logs_btn = button(text("Open Logs Folder").size(11))
+            .style(primary_button)
+            .on_press(Message::OpenLogsClicked);
+
+        column![row![open_logs_btn], log_box]
+            .spacing(8)
+            .padding(10)
             .into()
     }
 
@@ -878,6 +887,9 @@ impl State {
             }
             Message::LinkClicked(url) => {
                 let _ = open::that(url);
+            }
+            Message::OpenLogsClicked => {
+                crate::logging::open_log_dir();
             }
         }
     }

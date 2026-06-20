@@ -39,10 +39,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
 
 fn main() -> iced::Result {
+    let _log_guards = logging::init();
+
     let telemetry_enabled = preferences::PreferencesStore::load_or_default().telemetry_enabled();
 
     let _guard = (cfg!(not(debug_assertions)) && telemetry_enabled)
-        .then(|| option_env!("SENTRY_DSN"))
+        .then_some(option_env!("SENTRY_DSN"))
         .flatten()
         .map(|dsn| {
             sentry::init((

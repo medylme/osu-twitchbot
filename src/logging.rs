@@ -1,12 +1,24 @@
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::Local;
 use iced::futures::channel::mpsc;
 use owo_colors::OwoColorize;
-use sentry::Level;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Level, Subscriber};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::Layer;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
+use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::VERSION;
+use crate::{APP_NAME, VERSION};
+
+const LOG_FILE_LATEST: &str = "latest.log";
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -48,6 +60,12 @@ impl LogEntry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportToSentry {
+    Yes,
+    No,
+}
+
 type LogChannelType = (
     mpsc::Sender<LogEntry>,
     Arc<Mutex<Option<mpsc::Receiver<LogEntry>>>>,
@@ -62,108 +80,232 @@ pub fn get_log_channel() -> &'static LogChannelType {
     })
 }
 
-fn print_colored(entry: &LogEntry) {
-    let version_str = format!("v{}", VERSION);
-
-    let level_str = match entry.level {
-        LogLevel::Debug => format!("{:5}", entry.level).blue().to_string(),
-        LogLevel::Info => format!("{:5}", entry.level).green().to_string(),
-        LogLevel::Warn => format!("{:5}", entry.level).yellow().to_string(),
-        LogLevel::Error => format!("{:5}", entry.level).red().to_string(),
-    };
-
-    let module_str = format!("[{}]", entry.module).cyan().to_string();
-
-    println!(
-        "{} {}  {}  {} {}",
-        entry.timestamp.dimmed(),
-        version_str.dimmed(),
-        level_str,
-        module_str,
-        entry.message
-    );
-}
-
-pub fn log(level: LogLevel, module: &str, message: String) {
-    let entry = LogEntry::new(level, module, message);
-
-    // terminal
-    print_colored(&entry);
-
-    // gui
-    let (tx, _) = get_log_channel();
-    let _ = tx.clone().try_send(entry);
-}
-
-#[cfg(debug_assertions)]
-pub fn log_debug(module: &str, message: String) {
-    log(LogLevel::Debug, module, message);
-}
-
-#[cfg(not(debug_assertions))]
-pub fn log_debug(_module: &str, _message: String) {
-    // no-op for release builds
-}
-
-pub fn log_info(module: &str, message: String) {
-    log(LogLevel::Info, module, message);
-}
-
-pub fn log_warn(module: &str, message: String) {
-    log(LogLevel::Warn, module, message);
-}
-
-fn report_error_to_sentry(log_module: &str, message: &str) {
-    if cfg!(debug_assertions) {
-        return;
-    }
-    sentry::with_scope(
-        |scope| {
-            scope.set_tag("log_module", log_module);
-        },
-        || {
-            sentry::capture_message(message, Level::Error);
-        },
-    );
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReportToSentry {
-    Yes,
-    No,
-}
-
-pub fn log_error(module: &str, message: String, report_to_sentry: ReportToSentry) {
-    if matches!(report_to_sentry, ReportToSentry::Yes) {
-        report_error_to_sentry(module, &message);
-    }
-    log(LogLevel::Error, module, message);
-}
-
 #[macro_export]
 macro_rules! log_debug {
     ($module:literal, $($arg:tt)*) => {
-        $crate::logging::log_debug($module, format!($($arg)*));
+        ::tracing::debug!(target: $module, $($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! log_info {
     ($module:literal, $($arg:tt)*) => {
-        $crate::logging::log_info($module, format!($($arg)*));
+        ::tracing::info!(target: $module, $($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! log_warn {
     ($module:literal, $($arg:tt)*) => {
-        $crate::logging::log_warn($module, format!($($arg)*));
+        ::tracing::warn!(target: $module, $($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! log_error {
     ($module:literal, $sentry:expr, $($arg:tt)*) => {
-        $crate::logging::log_error($module, format!($($arg)*), $sentry);
+        match $sentry {
+            $crate::logging::ReportToSentry::Yes => ::tracing::error!(target: $module, $($arg)*),
+            $crate::logging::ReportToSentry::No => ::tracing::warn!(target: $module, $($arg)*),
+        }
     };
+}
+
+pub fn debug_enabled() -> bool {
+    cfg!(debug_assertions)
+        || std::env::var("OSU_TWITCHBOT_DEBUG").is_ok()
+        || std::env::args().any(|a| a == "--debug")
+}
+
+pub fn log_dir() -> Option<PathBuf> {
+    let dir = directories::BaseDirs::new()?
+        .data_local_dir()
+        .join(APP_NAME)
+        .join("logs");
+
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("could not create log dir {}: {e}", dir.display());
+        return None;
+    }
+
+    Some(dir)
+}
+
+pub fn open_log_dir() {
+    match log_dir() {
+        Some(path) => {
+            if let Err(e) = open::that(&path) {
+                tracing::error!(target: "log", "failed to open log dir {}: {e}", path.display());
+            }
+        }
+        None => tracing::warn!(target: "log", "could not resolve log dir"),
+    }
+}
+
+fn level_to_loglevel(level: &Level) -> LogLevel {
+    match *level {
+        Level::ERROR => LogLevel::Error,
+        Level::WARN => LogLevel::Warn,
+        Level::INFO => LogLevel::Info,
+        _ => LogLevel::Debug,
+    }
+}
+
+struct MessageVisitor(String);
+
+impl Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        if field.name() == "message" {
+            use std::fmt::Write;
+            let _ = write!(self.0, "{value:?}");
+        }
+    }
+}
+
+struct GuiLayer;
+
+impl<S: Subscriber> Layer<S> for GuiLayer {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let meta = event.metadata();
+        let mut visitor = MessageVisitor(String::new());
+        event.record(&mut visitor);
+        let entry = LogEntry::new(level_to_loglevel(meta.level()), meta.target(), visitor.0);
+        let (tx, _) = get_log_channel();
+        let _ = tx.clone().try_send(entry);
+    }
+}
+
+struct Pretty {
+    ansi: bool,
+}
+
+impl<S, N> FormatEvent<S, N> for Pretty
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> fmt::Result {
+        let meta = event.metadata();
+        let time = Local::now().format("%H:%M:%S%.3f");
+        let level = *meta.level();
+        let target = meta.target();
+
+        if self.ansi {
+            let level_str = match level {
+                Level::TRACE => format!("{:5}", "TRACE").purple().to_string(),
+                Level::DEBUG => format!("{:5}", "DEBUG").blue().to_string(),
+                Level::INFO => format!("{:5}", "INFO").green().to_string(),
+                Level::WARN => format!("{:5}", "WARN").yellow().to_string(),
+                Level::ERROR => format!("{:5}", "ERROR").red().to_string(),
+            };
+
+            write!(
+                writer,
+                "{} {}  {}  {} ",
+                time.dimmed(),
+                format!("v{VERSION}").dimmed(),
+                level_str,
+                format!("[{target}]").cyan(),
+            )?;
+        } else {
+            write!(
+                writer,
+                "{time} v{VERSION}  {:5}  [{target}] ",
+                level.as_str()
+            )?;
+        }
+
+        ctx.field_format().format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
+}
+
+fn log_file_name() -> String {
+    Local::now()
+        .format("osu-twitchbot-%Y%m%d-%H%M%S.log")
+        .to_string()
+}
+
+fn sentry_layer<S>() -> impl Layer<S>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    sentry_tracing::layer().event_filter(|meta| match *meta.level() {
+        Level::ERROR => sentry_tracing::EventFilter::Event,
+        Level::WARN => sentry_tracing::EventFilter::Breadcrumb,
+        _ => sentry_tracing::EventFilter::Ignore,
+    })
+}
+
+pub struct LogGuards {
+    _latest: WorkerGuard,
+    _timestamped: WorkerGuard,
+}
+
+pub fn init() -> Option<LogGuards> {
+    let level = if debug_enabled() {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
+
+    let console = tracing_subscriber::fmt::layer()
+        .event_format(Pretty { ansi: true })
+        .with_writer(std::io::stdout)
+        .with_filter(LevelFilter::from_level(level));
+
+    let gui = GuiLayer.with_filter(LevelFilter::from_level(level));
+
+    if !cfg!(debug_assertions) {
+        if let Some(dir) = log_dir() {
+            let _ = std::fs::remove_file(dir.join(LOG_FILE_LATEST));
+
+            let latest = tracing_appender::rolling::never(&dir, LOG_FILE_LATEST);
+            let archive = tracing_appender::rolling::never(&dir, log_file_name());
+            let (latest_nb, latest_guard) = tracing_appender::non_blocking(latest);
+            let (archive_nb, archive_guard) = tracing_appender::non_blocking(archive);
+
+            let latest_layer = tracing_subscriber::fmt::layer()
+                .event_format(Pretty { ansi: false })
+                .with_ansi(false)
+                .with_writer(latest_nb)
+                .with_filter(LevelFilter::from_level(level));
+            let archive_layer = tracing_subscriber::fmt::layer()
+                .event_format(Pretty { ansi: false })
+                .with_ansi(false)
+                .with_writer(archive_nb)
+                .with_filter(LevelFilter::from_level(level));
+
+            tracing_subscriber::registry()
+                .with(console)
+                .with(gui)
+                .with(latest_layer)
+                .with(archive_layer)
+                .with(sentry_layer())
+                .init();
+
+            return Some(LogGuards {
+                _latest: latest_guard,
+                _timestamped: archive_guard,
+            });
+        }
+
+        tracing_subscriber::registry()
+            .with(console)
+            .with(gui)
+            .with(sentry_layer())
+            .init();
+        return None;
+    }
+
+    tracing_subscriber::registry()
+        .with(console)
+        .with(gui)
+        .init();
+    None
 }
