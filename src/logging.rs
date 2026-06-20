@@ -9,7 +9,7 @@ use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::Layer;
-use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -242,6 +242,26 @@ where
     })
 }
 
+const APP_TARGETS: [&str; 9] = [
+    "main",
+    "gui",
+    "twitch",
+    "osu",
+    "memory-lazer",
+    "memory-stable",
+    "process",
+    "prefs",
+    "log",
+];
+
+fn app_filter(level: Level) -> Targets {
+    let mut targets = Targets::new().with_default(LevelFilter::WARN);
+    for target in APP_TARGETS {
+        targets = targets.with_target(target, level);
+    }
+    targets
+}
+
 pub struct LogGuards {
     _latest: WorkerGuard,
     _timestamped: WorkerGuard,
@@ -257,9 +277,9 @@ pub fn init() -> Option<LogGuards> {
     let console = tracing_subscriber::fmt::layer()
         .event_format(Pretty { ansi: true })
         .with_writer(std::io::stdout)
-        .with_filter(LevelFilter::from_level(level));
+        .with_filter(app_filter(level));
 
-    let gui = GuiLayer.with_filter(LevelFilter::from_level(level));
+    let gui = GuiLayer.with_filter(app_filter(level));
 
     if !cfg!(debug_assertions) {
         if let Some(dir) = log_dir() {
@@ -274,12 +294,12 @@ pub fn init() -> Option<LogGuards> {
                 .event_format(Pretty { ansi: false })
                 .with_ansi(false)
                 .with_writer(latest_nb)
-                .with_filter(LevelFilter::from_level(level));
+                .with_filter(app_filter(level));
             let archive_layer = tracing_subscriber::fmt::layer()
                 .event_format(Pretty { ansi: false })
                 .with_ansi(false)
                 .with_writer(archive_nb)
-                .with_filter(LevelFilter::from_level(level));
+                .with_filter(app_filter(level));
 
             tracing_subscriber::registry()
                 .with(console)
