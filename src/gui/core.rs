@@ -61,6 +61,7 @@ pub enum Message {
     LogEvent(LogEntry),
     LinkClicked(String),
     OpenLogsClicked,
+    OpenConfigClicked,
 }
 
 const MAX_LOG_ENTRIES: usize = 500;
@@ -543,7 +544,11 @@ impl State {
             .style(primary_button)
             .on_press(Message::OpenLogsClicked);
 
-        column![row![open_logs_btn], log_box]
+        let open_config_btn = button(text("Open Config Folder").size(11))
+            .style(primary_button)
+            .on_press(Message::OpenConfigClicked);
+
+        column![row![open_logs_btn, open_config_btn].spacing(8), log_box]
             .spacing(8)
             .padding(10)
             .into()
@@ -879,6 +884,9 @@ impl State {
             }
             Message::OpenLogsClicked => {
                 crate::logging::open_log_dir();
+            }
+            Message::OpenConfigClicked => {
+                crate::preferences::open_config_dir();
             }
         }
     }

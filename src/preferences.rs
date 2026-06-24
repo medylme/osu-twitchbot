@@ -10,6 +10,18 @@ use super::{APP_NAME, VERSION};
 
 const CONFIG_NAME: &str = "settings";
 
+pub fn open_config_dir() {
+    match confy::get_configuration_file_path(APP_NAME, CONFIG_NAME) {
+        Ok(path) => {
+            let dir = path.parent().unwrap_or(&path);
+            if let Err(e) = open::that(dir) {
+                log_warn!("prefs", "failed to open config dir {}: {e}", dir.display());
+            }
+        }
+        Err(e) => log_warn!("prefs", "could not resolve config dir: {e}"),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum PreferencesError {
     #[error("Failed to access preferences: {0}")]

@@ -66,6 +66,15 @@ Default:
 95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp {mods}
 ```
 
+## File Locations
+
+Settings are stored as `settings.toml`; logs are written to a `latest.log` (truncated each run) alongside timestamped archives. The Console tab has **Open Logs Folder** and **Open Config Folder** buttons.
+
+|          | Windows                                          | Linux                                  |
+| -------- | ------------------------------------------------ | -------------------------------------- |
+| Settings | `%APPDATA%\osu-twitchbot\config\settings.toml`   | `~/.config/osu-twitchbot/settings.toml` |
+| Logs     | `%LOCALAPPDATA%\osu-twitchbot\logs\`             | `~/.local/share/osu-twitchbot/logs/`   |
+
 ## Building from Source
 
 ### Prerequisites
@@ -83,8 +92,9 @@ Default:
 
 ```bash
 sudo apt install libdbus-1-dev pkg-config
-sudo apt install musl-tools
-cargo install cross --git github.com
+# to also cross-compile the Windows binary from Linux:
+sudo apt install gcc-mingw-w64-x86-64
+rustup target add x86_64-pc-windows-gnu
 ```
 
 ### Environment Setup

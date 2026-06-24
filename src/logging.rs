@@ -77,28 +77,28 @@ pub fn get_log_channel() -> &'static LogChannelType {
 #[macro_export]
 macro_rules! log_debug {
     ($module:literal, $($arg:tt)*) => {
-        ::tracing::debug!(target: $module, $($arg)*);
+        ::tracing::debug!(target: $module, $($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! log_info {
     ($module:literal, $($arg:tt)*) => {
-        ::tracing::info!(target: $module, $($arg)*);
+        ::tracing::info!(target: $module, $($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! log_warn {
     ($module:literal, $($arg:tt)*) => {
-        ::tracing::warn!(target: $module, $($arg)*);
+        ::tracing::warn!(target: $module, $($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! log_error {
     ($module:literal, $($arg:tt)*) => {
-        ::tracing::error!(target: $module, $($arg)*);
+        ::tracing::error!(target: $module, $($arg)*)
     };
 }
 
