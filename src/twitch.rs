@@ -11,7 +11,6 @@ use tokio::time::{self, Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::logging::ReportToSentry;
 use crate::osu::core::{MemoryEvent, OsuCommand};
 use crate::osu::pp::get_pp_spread;
 use crate::placeholders::Placeholders;
@@ -571,7 +570,6 @@ impl TwitchClient {
                                 ).await {
                                     log_error!(
                                         "twitch",
-                                        ReportToSentry::Yes,
                                         "Failed to send chat message: {}",
                                         e
                                     );
@@ -589,7 +587,6 @@ impl TwitchClient {
                                 ).await {
                                     log_error!(
                                         "twitch",
-                                        ReportToSentry::Yes,
                                         "Failed to send chat message: {}",
                                         e
                                     );
@@ -665,12 +662,7 @@ impl TwitchClient {
                             let osu_command = OsuCommand::RequestBeatmapData;
 
                             if let Err(e) = osu_tx.send(osu_command).await {
-                                log_error!(
-                                    "twitch",
-                                    ReportToSentry::Yes,
-                                    "Failed to send osu command: {}",
-                                    e
-                                );
+                                log_error!("twitch", "Failed to send osu command: {}", e);
                             } else {
                                 *pending_request = Some(PendingRequest {
                                     message_id: event.message_id.clone(),

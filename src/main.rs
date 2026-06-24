@@ -22,7 +22,7 @@ mod updater;
 
 use gui::core::{Message, State};
 use gui::theme::{ThemeOverride, get_current_theme, set_theme_override};
-use logging::{LogEntry, ReportToSentry, get_log_channel};
+use logging::{LogEntry, get_log_channel};
 use osu::core::{
     BeatmapData, DetectedProcess, MemoryEvent, OsuClient, OsuCommand, OsuStatus,
     detect_osu_processes,
@@ -39,9 +39,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
 
 fn main() -> iced::Result {
-    let _log_guards = logging::init();
-
     let telemetry_enabled = preferences::PreferencesStore::load_or_default().telemetry_enabled();
+
+    let _log_guards = logging::init(telemetry_enabled);
 
     let _guard = (cfg!(not(debug_assertions)) && telemetry_enabled)
         .then_some(option_env!("SENTRY_DSN"))
@@ -60,6 +60,18 @@ fn main() -> iced::Result {
                 },
             ))
         });
+
+    // sentry's panic integration captures the event; chain a flush so it is
+    // sent before the process unwinds away (the held guard also flushes on drop)
+    if _guard.is_some() {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if let Some(client) = sentry::Hub::current().client() {
+                client.flush(Some(std::time::Duration::from_secs(2)));
+            }
+            prev(info);
+        }));
+    }
 
     set_auto_update_enabled(args_auto_update());
     set_theme_override(args_theme_override());
@@ -225,7 +237,7 @@ fn osu_worker() -> impl iced::futures::Stream<Item = MemoryEvent> {
             };
 
             if let Err(e) = result {
-                log_error!("osu", ReportToSentry::Yes, "Memory reader error: {:#?}", e);
+                log_error!("osu", "Memory reader error: {:#?}", e);
             }
 
             current_beatmap = None;
@@ -311,18 +323,19 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
                                             .await
                                         {
                                             let err_s = e.to_string();
-                                            let report_ws =
-                                                if err_s.contains("Server requested reconnect") {
-                                                    ReportToSentry::No
-                                                } else {
-                                                    ReportToSentry::Yes
-                                                };
-                                            log_error!(
-                                                "twitch",
-                                                report_ws,
-                                                "Websocket handler error: {}",
-                                                e
-                                            );
+                                            if err_s.contains("Server requested reconnect") {
+                                                log_warn!(
+                                                    "twitch",
+                                                    "Websocket handler error: {}",
+                                                    e
+                                                );
+                                            } else {
+                                                log_error!(
+                                                    "twitch",
+                                                    "Websocket handler error: {}",
+                                                    e
+                                                );
+                                            }
 
                                             if err_s.contains("Server requested reconnect") {
                                                 let _ = tx_clone
@@ -348,29 +361,22 @@ fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
                                 }
                                 Err(e) => {
                                     let error_msg = e.to_string();
-                                    let report_sub = if is_invalid_access_token_error(&error_msg) {
-                                        ReportToSentry::No
+                                    if is_invalid_access_token_error(&error_msg) {
+                                        log_warn!("twitch", "Subscription error: {:#?}", e);
                                     } else {
-                                        ReportToSentry::Yes
-                                    };
-                                    log_error!(
-                                        "twitch",
-                                        report_sub,
-                                        "Subscription error: {:#?}",
-                                        e
-                                    );
+                                        log_error!("twitch", "Subscription error: {:#?}", e);
+                                    }
                                     let _ = tx.send(TwitchEvent::Error(error_msg)).await;
                                 }
                             }
                         }
                         Err(e) => {
                             let error_msg = e.to_string();
-                            let report_client = if is_invalid_access_token_error(&error_msg) {
-                                ReportToSentry::No
+                            if is_invalid_access_token_error(&error_msg) {
+                                log_warn!("twitch", "Client creation error: {:#?}", e);
                             } else {
-                                ReportToSentry::Yes
-                            };
-                            log_error!("twitch", report_client, "Client creation error: {:#?}", e);
+                                log_error!("twitch", "Client creation error: {:#?}", e);
+                            }
                             let _ = tx.send(TwitchEvent::Error(error_msg)).await;
                         }
                     }

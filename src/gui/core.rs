@@ -15,7 +15,7 @@ use super::components::{
 };
 use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
-use crate::logging::{LogEntry, LogLevel, ReportToSentry};
+use crate::logging::{LogEntry, LogLevel};
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
 use crate::osu::pp::get_pp_spread;
 use crate::placeholders::Placeholders;
@@ -674,12 +674,7 @@ impl State {
                     pp_command: self.pp_command.clone(),
                     pp_format: self.pp_format.clone(),
                 }) {
-                    log_error!(
-                        "gui",
-                        ReportToSentry::Yes,
-                        "Failed to send connect command: {}",
-                        e
-                    );
+                    log_error!("gui", "Failed to send connect command: {}", e);
                     self.twitch_status =
                         TwitchStatus::Error("Failed to send connect command".to_string());
                 }
@@ -688,12 +683,7 @@ impl State {
                 log_debug!("gui", "Disconnect clicked");
                 self.twitch_status = TwitchStatus::Disconnected;
                 if let Err(e) = self.twitch_cmd_tx.try_send(TwitchCommand::Disconnect) {
-                    log_error!(
-                        "gui",
-                        ReportToSentry::Yes,
-                        "Failed to send disconnect command: {}",
-                        e
-                    );
+                    log_error!("gui", "Failed to send disconnect command: {}", e);
                 }
             }
             Message::ClearTokenClicked => {
@@ -864,12 +854,11 @@ impl State {
                     self.twitch_status = TwitchStatus::Disconnected;
                 }
                 TwitchEvent::Error(ref e) => {
-                    let report_conn = if is_invalid_access_token_error(e) {
-                        ReportToSentry::No
+                    if is_invalid_access_token_error(e) {
+                        log_warn!("twitch", "Connection error: {}", e);
                     } else {
-                        ReportToSentry::Yes
-                    };
-                    log_error!("twitch", report_conn, "Connection error: {}", e);
+                        log_error!("twitch", "Connection error: {}", e);
+                    }
                     let status_msg = if is_invalid_access_token_error(e) {
                         INVALID_ACCESS_TOKEN_STATUS.to_string()
                     } else {

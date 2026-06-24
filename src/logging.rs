@@ -60,12 +60,6 @@ impl LogEntry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReportToSentry {
-    Yes,
-    No,
-}
-
 type LogChannelType = (
     mpsc::Sender<LogEntry>,
     Arc<Mutex<Option<mpsc::Receiver<LogEntry>>>>,
@@ -103,11 +97,8 @@ macro_rules! log_warn {
 
 #[macro_export]
 macro_rules! log_error {
-    ($module:literal, $sentry:expr, $($arg:tt)*) => {
-        match $sentry {
-            $crate::logging::ReportToSentry::Yes => ::tracing::error!(target: $module, $($arg)*),
-            $crate::logging::ReportToSentry::No => ::tracing::warn!(target: $module, $($arg)*),
-        }
+    ($module:literal, $($arg:tt)*) => {
+        ::tracing::error!(target: $module, $($arg)*);
     };
 }
 
@@ -267,7 +258,7 @@ pub struct LogGuards {
     _timestamped: WorkerGuard,
 }
 
-pub fn init() -> Option<LogGuards> {
+pub fn init(telemetry_enabled: bool) -> Option<LogGuards> {
     let level = if debug_enabled() {
         Level::DEBUG
     } else {
@@ -306,7 +297,7 @@ pub fn init() -> Option<LogGuards> {
                 .with(gui)
                 .with(latest_layer)
                 .with(archive_layer)
-                .with(sentry_layer())
+                .with(telemetry_enabled.then(sentry_layer))
                 .init();
 
             return Some(LogGuards {
@@ -318,7 +309,7 @@ pub fn init() -> Option<LogGuards> {
         tracing_subscriber::registry()
             .with(console)
             .with(gui)
-            .with(sentry_layer())
+            .with(telemetry_enabled.then(sentry_layer))
             .init();
         return None;
     }
