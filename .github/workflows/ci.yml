@@ -38,10 +38,10 @@ jobs:
         run: cargo check --target x86_64-pc-windows-gnu
 
       - name: Clippy (Linux)
-        run: cargo clippy -- -W clippy::pedantic
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Clippy (Windows)
-        run: cargo clippy --target x86_64-pc-windows-gnu -- -W clippy::pedantic
+        run: cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 
       - name: Format
         run: cargo fmt -- --check

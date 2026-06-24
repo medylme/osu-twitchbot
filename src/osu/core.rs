@@ -321,10 +321,10 @@ impl ProcessMemory {
                     {
                         let region_size = mbi.RegionSize;
 
-                        if let Ok(data) = self.read_bytes(address, region_size) {
-                            if let Some(offset) = find_pattern(&data, pattern, mask) {
-                                return Ok(address + offset);
-                            }
+                        if let Ok(data) = self.read_bytes(address, region_size)
+                            && let Some(offset) = find_pattern(&data, pattern, mask)
+                        {
+                            return Ok(address + offset);
                         }
                     }
 
