@@ -1,12 +1,12 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
-use iced::futures::channel::mpsc;
-use iced::futures::stream::{SplitSink, SplitStream};
-use iced::futures::{SinkExt, StreamExt};
+use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio::time::{self, Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
@@ -530,7 +530,7 @@ impl TwitchClient {
                     }
                 }
 
-                Some(osu_event) = osu_rx.next() => {
+                Some(osu_event) = osu_rx.recv() => {
                     drop(read);
 
                     match osu_event {
@@ -605,7 +605,7 @@ impl TwitchClient {
     async fn handle_eventsub_message(
         &self,
         message: &str,
-        mut osu_tx: mpsc::Sender<OsuCommand>,
+        osu_tx: mpsc::Sender<OsuCommand>,
         pending_request: &mut Option<PendingRequest>,
         last_command_time: &mut Option<Instant>,
         rate_limit_duration: Duration,

@@ -2,8 +2,8 @@ use std::fmt::Display;
 use std::io;
 use std::path::Path;
 
-use iced::futures::channel::mpsc;
 use serde::Deserialize;
+use tokio::sync::mpsc;
 
 use crate::log_debug;
 

@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::mpsc;
+
 use iced::Alignment::Center;
-use iced::futures::channel::mpsc;
 use iced::widget::{
     button, center_x, center_y, checkbox, column, container, rich_text, row, scrollable, span,
     text, text_input,

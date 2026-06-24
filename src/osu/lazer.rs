@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use iced::futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
 use super::core::{
@@ -24,9 +24,9 @@ fn get_latest_version(offsets_map: &HashMap<String, Offsets>) -> Option<&str> {
 pub async fn run_lazer_reader(
     pid: u32,
     version: Option<String>,
-    tx: &mut iced::futures::channel::mpsc::Sender<MemoryEvent>,
-    cmd_rx: &mut iced::futures::channel::mpsc::Receiver<OsuCommand>,
-    forward_tx: &mut iced::futures::channel::mpsc::Sender<MemoryEvent>,
+    tx: &mut mpsc::Sender<MemoryEvent>,
+    cmd_rx: &mut mpsc::Receiver<OsuCommand>,
+    forward_tx: &mut mpsc::Sender<MemoryEvent>,
     current_beatmap: &mut Option<BeatmapData>,
 ) -> Result<(), MemoryError> {
     log_debug!(
@@ -146,7 +146,7 @@ pub async fn run_lazer_reader(
                 }
             }
 
-            Some(cmd) = cmd_rx.next() => {
+            Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     OsuCommand::RequestBeatmapData => {
                         let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());

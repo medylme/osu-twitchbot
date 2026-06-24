@@ -5,10 +5,10 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use iced::futures::channel::mpsc;
-use iced::futures::{SinkExt, StreamExt};
+use iced::futures::SinkExt;
 use iced::window;
 use iced::{Subscription, stream};
+use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
 mod credentials;
@@ -93,12 +93,21 @@ fn main() -> iced::Result {
     )
     .ok();
 
-    iced::application(State::new, State::update, State::view)
+    // background workers run on their own runtime; they talk to the GUI purely
+    // over tokio channels, so the osu/twitch/logging modules never touch iced
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+    runtime.spawn(osu_worker());
+    runtime.spawn(twitch_worker());
+
+    let result = iced::application(State::new, State::update, State::view)
         .subscription(|_| {
             Subscription::batch([
-                Subscription::run(osu_worker).map(Message::OsuEvent),
-                Subscription::run(twitch_worker).map(Message::TwitchEvent),
-                Subscription::run(log_worker).map(Message::LogEvent),
+                Subscription::run(osu_event_subscription).map(Message::OsuEvent),
+                Subscription::run(twitch_event_subscription).map(Message::TwitchEvent),
+                Subscription::run(log_subscription).map(Message::LogEvent),
             ])
         })
         .theme(theme)
@@ -110,304 +119,303 @@ fn main() -> iced::Result {
             ..Default::default()
         })
         .centered()
-        .run()
+        .run();
+
+    // tear down the workers once the window closes
+    drop(runtime);
+    result
 }
 
-type OsuChannelType = (
-    mpsc::Sender<OsuCommand>,
-    Arc<Mutex<Option<mpsc::Receiver<OsuCommand>>>>,
-);
+/// a sender plus a one-time-takeable receiver, shared between the GUI / a
+/// subscription bridge and a background worker
+type Channel<T> = (mpsc::Sender<T>, Arc<Mutex<Option<mpsc::Receiver<T>>>>);
 
-type TwitchChannelType = (
-    mpsc::Sender<TwitchCommand>,
-    Arc<Mutex<Option<mpsc::Receiver<TwitchCommand>>>>,
-);
-
-type OsuEventForwardType = (
-    mpsc::Sender<MemoryEvent>,
-    Arc<Mutex<Option<mpsc::Receiver<MemoryEvent>>>>,
-);
-
-static OSU_CHANNEL: OnceLock<OsuChannelType> = OnceLock::new();
-static TWITCH_CHANNEL: OnceLock<TwitchChannelType> = OnceLock::new();
-static OSU_EVENT_FORWARD: OnceLock<OsuEventForwardType> = OnceLock::new();
-
-fn get_osu_channel() -> &'static OsuChannelType {
-    OSU_CHANNEL.get_or_init(|| {
-        let (tx, rx) = mpsc::channel(10);
-        (tx, Arc::new(Mutex::new(Some(rx))))
-    })
+fn new_channel<T>(buffer: usize) -> Channel<T> {
+    let (tx, rx) = mpsc::channel(buffer);
+    (tx, Arc::new(Mutex::new(Some(rx))))
 }
 
-fn get_twitch_channel() -> &'static TwitchChannelType {
-    TWITCH_CHANNEL.get_or_init(|| {
-        let (tx, rx) = mpsc::channel(10);
-        (tx, Arc::new(Mutex::new(Some(rx))))
-    })
+// GUI -> worker (commands)
+static OSU_CHANNEL: OnceLock<Channel<OsuCommand>> = OnceLock::new();
+static TWITCH_CHANNEL: OnceLock<Channel<TwitchCommand>> = OnceLock::new();
+// worker -> GUI (events, drained by the bridge subscriptions)
+static OSU_EVENT: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
+static TWITCH_EVENT: OnceLock<Channel<TwitchEvent>> = OnceLock::new();
+// osu worker -> twitch worker (beatmap responses)
+static OSU_EVENT_FORWARD: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
+
+fn get_osu_channel() -> &'static Channel<OsuCommand> {
+    OSU_CHANNEL.get_or_init(|| new_channel(10))
 }
 
-fn get_osu_event_forward() -> &'static OsuEventForwardType {
-    OSU_EVENT_FORWARD.get_or_init(|| {
-        let (tx, rx) = mpsc::channel(10);
-        (tx, Arc::new(Mutex::new(Some(rx))))
-    })
+fn get_twitch_channel() -> &'static Channel<TwitchCommand> {
+    TWITCH_CHANNEL.get_or_init(|| new_channel(10))
 }
 
-fn log_worker() -> impl iced::futures::Stream<Item = LogEntry> {
-    stream::channel(100, |mut tx: mpsc::Sender<LogEntry>| async move {
-        let (_, rx_holder) = get_log_channel();
-        let log_rx = rx_holder.lock().unwrap().take();
-
-        let Some(mut log_rx) = log_rx else {
-            std::future::pending::<()>().await;
-            return;
-        };
-
-        while let Some(entry) = log_rx.next().await {
-            let _ = tx.send(entry).await;
-        }
-    })
+fn get_osu_event() -> &'static Channel<MemoryEvent> {
+    OSU_EVENT.get_or_init(|| new_channel(10))
 }
 
-fn osu_worker() -> impl iced::futures::Stream<Item = MemoryEvent> {
-    stream::channel(10, |mut tx: mpsc::Sender<MemoryEvent>| async move {
-        let (_, rx_holder) = get_osu_channel();
-        let cmd_rx = rx_holder.lock().unwrap().take();
+fn get_twitch_event() -> &'static Channel<TwitchEvent> {
+    TWITCH_EVENT.get_or_init(|| new_channel(10))
+}
 
-        let Some(mut cmd_rx) = cmd_rx else {
-            std::future::pending::<()>().await;
-            return;
-        };
+fn get_osu_event_forward() -> &'static Channel<MemoryEvent> {
+    OSU_EVENT_FORWARD.get_or_init(|| new_channel(10))
+}
 
-        let (forward_tx, _) = get_osu_event_forward();
-        let mut forward_tx = forward_tx.clone();
+/// bridge a worker's tokio event receiver into an iced subscription
+fn bridge<T: Send + 'static>(
+    channel: &'static Channel<T>,
+    buffer: usize,
+) -> impl iced::futures::Stream<Item = T> {
+    stream::channel(
+        buffer,
+        move |mut output: iced::futures::channel::mpsc::Sender<T>| async move {
+            let taken = channel.1.lock().unwrap().take();
+            let Some(mut rx) = taken else {
+                std::future::pending::<()>().await;
+                return;
+            };
+            while let Some(item) = rx.recv().await {
+                let _ = output.send(item).await;
+            }
+        },
+    )
+}
 
-        let mut current_beatmap: Option<BeatmapData> = None;
+fn log_subscription() -> impl iced::futures::Stream<Item = LogEntry> {
+    bridge(get_log_channel(), 100)
+}
 
-        loop {
-            let _ = tx
-                .send(MemoryEvent::StatusChanged(OsuStatus::Scanning))
-                .await;
+fn osu_event_subscription() -> impl iced::futures::Stream<Item = MemoryEvent> {
+    bridge(get_osu_event(), 10)
+}
 
-            let process: DetectedProcess = loop {
-                if let Ok(Some(cmd)) = cmd_rx.try_next() {
-                    match cmd {
-                        OsuCommand::RequestBeatmapData => {
-                            let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
-                            let _ = tx.send(event.clone()).await;
-                            let _ = forward_tx.send(event).await;
-                        }
-                        OsuCommand::UpdateEventForwardSender(new_sender) => {
-                            forward_tx = new_sender;
-                            log_debug!("osu", "Updated event forward sender");
-                        }
+fn twitch_event_subscription() -> impl iced::futures::Stream<Item = TwitchEvent> {
+    bridge(get_twitch_event(), 10)
+}
+
+async fn osu_worker() {
+    let cmd_rx = get_osu_channel().1.lock().unwrap().take();
+    let Some(mut cmd_rx) = cmd_rx else {
+        return;
+    };
+
+    let mut tx = get_osu_event().0.clone();
+    let mut forward_tx = get_osu_event_forward().0.clone();
+
+    let mut current_beatmap: Option<BeatmapData> = None;
+
+    loop {
+        let _ = tx
+            .send(MemoryEvent::StatusChanged(OsuStatus::Scanning))
+            .await;
+
+        let process: DetectedProcess = loop {
+            while let Ok(cmd) = cmd_rx.try_recv() {
+                match cmd {
+                    OsuCommand::RequestBeatmapData => {
+                        let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
+                        let _ = tx.send(event.clone()).await;
+                        let _ = forward_tx.send(event).await;
+                    }
+                    OsuCommand::UpdateEventForwardSender(new_sender) => {
+                        forward_tx = new_sender;
+                        log_debug!("osu", "Updated event forward sender");
                     }
                 }
-
-                let processes = detect_osu_processes();
-                if let Some(found) = processes.into_iter().next() {
-                    break found;
-                }
-                time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
-            };
-
-            let result = match process.client {
-                OsuClient::Lazer => {
-                    run_lazer_reader(
-                        process.pid,
-                        process.version,
-                        &mut tx,
-                        &mut cmd_rx,
-                        &mut forward_tx,
-                        &mut current_beatmap,
-                    )
-                    .await
-                }
-                OsuClient::Stable => {
-                    run_stable_reader(
-                        process.pid,
-                        process.songs_folder.clone(),
-                        &mut tx,
-                        &mut cmd_rx,
-                        &mut forward_tx,
-                        &mut current_beatmap,
-                    )
-                    .await
-                }
-            };
-
-            if let Err(e) = result {
-                log_error!("osu", "Memory reader error: {:#?}", e);
             }
 
-            current_beatmap = None;
-            let event = MemoryEvent::BeatmapChanged(None);
-            let _ = tx.send(event.clone()).await;
-            let _ = forward_tx.send(event).await;
-
-            let _ = tx
-                .send(MemoryEvent::StatusChanged(OsuStatus::Disconnected))
-                .await;
+            let processes = detect_osu_processes();
+            if let Some(found) = processes.into_iter().next() {
+                break found;
+            }
             time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
-        }
-    })
-}
-
-fn twitch_worker() -> impl iced::futures::Stream<Item = TwitchEvent> {
-    stream::channel(10, |mut tx: mpsc::Sender<TwitchEvent>| async move {
-        let (_, rx_holder) = get_twitch_channel();
-        let cmd_rx = rx_holder.lock().unwrap().take();
-
-        let Some(mut cmd_rx) = cmd_rx else {
-            std::future::pending::<()>().await;
-            return;
         };
 
-        let (osu_tx, _) = get_osu_channel();
+        let result = match process.client {
+            OsuClient::Lazer => {
+                run_lazer_reader(
+                    process.pid,
+                    process.version,
+                    &mut tx,
+                    &mut cmd_rx,
+                    &mut forward_tx,
+                    &mut current_beatmap,
+                )
+                .await
+            }
+            OsuClient::Stable => {
+                run_stable_reader(
+                    process.pid,
+                    process.songs_folder.clone(),
+                    &mut tx,
+                    &mut cmd_rx,
+                    &mut forward_tx,
+                    &mut current_beatmap,
+                )
+                .await
+            }
+        };
 
-        let mut websocket_handle: Option<tokio::task::JoinHandle<()>> = None;
-        let mut current_client: Option<Arc<TwitchClient>> = None;
+        if let Err(e) = result {
+            log_error!("osu", "Memory reader error: {:#?}", e);
+        }
 
-        while let Some(cmd) = cmd_rx.next().await {
-            match cmd {
-                TwitchCommand::Connect {
-                    token,
-                    np_command,
-                    np_format,
-                    pp_command,
-                    pp_format,
-                } => {
-                    // clean up any existing connections
-                    if let Some(handle) = websocket_handle.take() {
-                        handle.abort();
-                    }
-                    current_client = None;
+        current_beatmap = None;
+        let event = MemoryEvent::BeatmapChanged(None);
+        let _ = tx.send(event.clone()).await;
+        let _ = forward_tx.send(event).await;
 
-                    let result =
-                        TwitchClient::new(&token, np_command, np_format, pp_command, pp_format)
-                            .await;
-                    match result {
-                        Ok(client) => {
-                            let client = Arc::new(client);
-                            let display_name = client.user.display_name.clone();
-                            let user_id = client.user.id.clone();
+        let _ = tx
+            .send(MemoryEvent::StatusChanged(OsuStatus::Disconnected))
+            .await;
+        time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
+    }
+}
 
-                            let subscribe_result =
-                                client.subscribe_to_channel_messages(&user_id).await;
+async fn twitch_worker() {
+    let cmd_rx = get_twitch_channel().1.lock().unwrap().take();
+    let Some(mut cmd_rx) = cmd_rx else {
+        return;
+    };
 
-                            match subscribe_result {
-                                Ok(()) => {
-                                    // create a new channel and update the osu worker with it
-                                    let (new_forward_tx, osu_event_rx) =
-                                        mpsc::channel::<MemoryEvent>(10);
+    let tx = get_twitch_event().0.clone();
+    let osu_tx = get_osu_channel().0.clone();
 
-                                    let mut osu_tx_for_update = osu_tx.clone();
-                                    if let Err(e) = osu_tx_for_update
-                                        .send(OsuCommand::UpdateEventForwardSender(new_forward_tx))
+    let mut websocket_handle: Option<tokio::task::JoinHandle<()>> = None;
+    let mut current_client: Option<Arc<TwitchClient>> = None;
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            TwitchCommand::Connect {
+                token,
+                np_command,
+                np_format,
+                pp_command,
+                pp_format,
+            } => {
+                // clean up any existing connections
+                if let Some(handle) = websocket_handle.take() {
+                    handle.abort();
+                }
+                current_client = None;
+
+                let result =
+                    TwitchClient::new(&token, np_command, np_format, pp_command, pp_format).await;
+                match result {
+                    Ok(client) => {
+                        let client = Arc::new(client);
+                        let display_name = client.user.display_name.clone();
+                        let user_id = client.user.id.clone();
+
+                        let subscribe_result = client.subscribe_to_channel_messages(&user_id).await;
+
+                        match subscribe_result {
+                            Ok(()) => {
+                                // create a new channel and update the osu worker with it
+                                let (new_forward_tx, osu_event_rx) =
+                                    mpsc::channel::<MemoryEvent>(10);
+
+                                let osu_tx_for_update = osu_tx.clone();
+                                if let Err(e) = osu_tx_for_update
+                                    .send(OsuCommand::UpdateEventForwardSender(new_forward_tx))
+                                    .await
+                                {
+                                    log_warn!(
+                                        "twitch",
+                                        "Failed to update osu event forward sender: {}",
+                                        e
+                                    );
+                                }
+
+                                let osu_tx_clone = osu_tx.clone();
+                                let tx_clone = tx.clone();
+                                let client_clone = Arc::clone(&client);
+
+                                let ws_handle = tokio::spawn(async move {
+                                    if let Err(e) = client_clone
+                                        .init_websocket_handler(osu_tx_clone, osu_event_rx)
                                         .await
                                     {
-                                        log_warn!(
-                                            "twitch",
-                                            "Failed to update osu event forward sender: {}",
-                                            e
-                                        );
-                                    }
+                                        let err_s = e.to_string();
+                                        if err_s.contains("Server requested reconnect") {
+                                            log_warn!("twitch", "Websocket handler error: {}", e);
+                                        } else {
+                                            log_error!("twitch", "Websocket handler error: {}", e);
+                                        }
 
-                                    let osu_tx_clone = osu_tx.clone();
-                                    let mut tx_clone = tx.clone();
-                                    let client_clone = Arc::clone(&client);
-
-                                    let ws_handle = tokio::spawn(async move {
-                                        if let Err(e) = client_clone
-                                            .init_websocket_handler(osu_tx_clone, osu_event_rx)
-                                            .await
-                                        {
-                                            let err_s = e.to_string();
-                                            if err_s.contains("Server requested reconnect") {
-                                                log_warn!(
-                                                    "twitch",
-                                                    "Websocket handler error: {}",
-                                                    e
-                                                );
-                                            } else {
-                                                log_error!(
-                                                    "twitch",
-                                                    "Websocket handler error: {}",
-                                                    e
-                                                );
-                                            }
-
-                                            if err_s.contains("Server requested reconnect") {
-                                                let _ = tx_clone
+                                        if err_s.contains("Server requested reconnect") {
+                                            let _ = tx_clone
                                                     .send(TwitchEvent::Error(
                                                         "Reconnection needed - please reconnect manually"
                                                             .to_string(),
                                                     ))
                                                     .await;
-                                            } else {
-                                                let _ = tx_clone
-                                                    .send(TwitchEvent::Error(e.to_string()))
-                                                    .await;
-                                            }
                                         } else {
-                                            let _ = tx_clone.send(TwitchEvent::Disconnected).await;
+                                            let _ = tx_clone
+                                                .send(TwitchEvent::Error(e.to_string()))
+                                                .await;
                                         }
-                                    });
-
-                                    websocket_handle = Some(ws_handle);
-                                    current_client = Some(client);
-
-                                    let _ = tx.send(TwitchEvent::Connected(display_name)).await;
-                                }
-                                Err(e) => {
-                                    let error_msg = e.to_string();
-                                    if is_invalid_access_token_error(&error_msg) {
-                                        log_warn!("twitch", "Subscription error: {:#?}", e);
                                     } else {
-                                        log_error!("twitch", "Subscription error: {:#?}", e);
+                                        let _ = tx_clone.send(TwitchEvent::Disconnected).await;
                                     }
-                                    let _ = tx.send(TwitchEvent::Error(error_msg)).await;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let error_msg = e.to_string();
-                            if is_invalid_access_token_error(&error_msg) {
-                                log_warn!("twitch", "Client creation error: {:#?}", e);
-                            } else {
-                                log_error!("twitch", "Client creation error: {:#?}", e);
-                            }
-                            let _ = tx.send(TwitchEvent::Error(error_msg)).await;
-                        }
-                    }
-                }
-                TwitchCommand::Disconnect => {
-                    if let Some(handle) = websocket_handle.take() {
-                        handle.abort();
-                    }
-                    current_client = None;
+                                });
 
-                    let _ = tx.send(TwitchEvent::Disconnected).await;
-                }
-                TwitchCommand::UpdatePreferences {
-                    np_command,
-                    np_format,
-                    pp_command,
-                    pp_format,
-                } => {
-                    if let Some(ref client) = current_client {
-                        client
-                            .update_preferences(np_command, np_format, pp_command, pp_format)
-                            .await;
+                                websocket_handle = Some(ws_handle);
+                                current_client = Some(client);
+
+                                let _ = tx.send(TwitchEvent::Connected(display_name)).await;
+                            }
+                            Err(e) => {
+                                let error_msg = e.to_string();
+                                if is_invalid_access_token_error(&error_msg) {
+                                    log_warn!("twitch", "Subscription error: {:#?}", e);
+                                } else {
+                                    log_error!("twitch", "Subscription error: {:#?}", e);
+                                }
+                                let _ = tx.send(TwitchEvent::Error(error_msg)).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        if is_invalid_access_token_error(&error_msg) {
+                            log_warn!("twitch", "Client creation error: {:#?}", e);
+                        } else {
+                            log_error!("twitch", "Client creation error: {:#?}", e);
+                        }
+                        let _ = tx.send(TwitchEvent::Error(error_msg)).await;
                     }
                 }
             }
-        }
+            TwitchCommand::Disconnect => {
+                if let Some(handle) = websocket_handle.take() {
+                    handle.abort();
+                }
+                current_client = None;
 
-        if let Some(handle) = websocket_handle {
-            handle.abort();
+                let _ = tx.send(TwitchEvent::Disconnected).await;
+            }
+            TwitchCommand::UpdatePreferences {
+                np_command,
+                np_format,
+                pp_command,
+                pp_format,
+            } => {
+                if let Some(ref client) = current_client {
+                    client
+                        .update_preferences(np_command, np_format, pp_command, pp_format)
+                        .await;
+                }
+            }
         }
-    })
+    }
+
+    if let Some(handle) = websocket_handle {
+        handle.abort();
+    }
 }
 
 fn theme(_state: &State) -> iced::Theme {

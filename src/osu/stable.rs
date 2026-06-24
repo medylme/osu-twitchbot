@@ -1,5 +1,5 @@
-use iced::futures::{SinkExt, StreamExt};
 use serde::Deserialize;
+use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
 use super::core::{
@@ -11,9 +11,9 @@ use crate::{log_debug, log_error, log_warn};
 pub async fn run_stable_reader(
     pid: u32,
     songs_folder: Option<String>,
-    tx: &mut iced::futures::channel::mpsc::Sender<MemoryEvent>,
-    cmd_rx: &mut iced::futures::channel::mpsc::Receiver<OsuCommand>,
-    forward_tx: &mut iced::futures::channel::mpsc::Sender<MemoryEvent>,
+    tx: &mut mpsc::Sender<MemoryEvent>,
+    cmd_rx: &mut mpsc::Receiver<OsuCommand>,
+    forward_tx: &mut mpsc::Sender<MemoryEvent>,
     current_beatmap: &mut Option<BeatmapData>,
 ) -> Result<(), MemoryError> {
     log_debug!(
@@ -96,7 +96,7 @@ pub async fn run_stable_reader(
                 }
             }
 
-            Some(cmd) = cmd_rx.next() => {
+            Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     OsuCommand::RequestBeatmapData => {
                         let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
