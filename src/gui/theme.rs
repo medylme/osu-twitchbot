@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use iced::{Color, Theme, color};
 
 static THEME_OVERRIDE: OnceLock<ThemeOverride> = OnceLock::new();
+static SYSTEM_THEME: OnceLock<Theme> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThemeOverride {
@@ -32,7 +33,9 @@ pub fn get_current_theme() -> Theme {
     match override_setting {
         ThemeOverride::Light => Theme::Light,
         ThemeOverride::Dark => Theme::Dark,
-        ThemeOverride::System => detect_system_theme(),
+        // detection does a blocking round-trip (d-bus on linux) and this is
+        // called every redraw, so detect once and cache
+        ThemeOverride::System => SYSTEM_THEME.get_or_init(detect_system_theme).clone(),
     }
 }
 
