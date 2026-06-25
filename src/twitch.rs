@@ -631,11 +631,18 @@ impl TwitchClient {
                     if let Some(event) = event_data {
                         let np_command = self.chatbot_preferences.np.command.lock().await.clone();
                         let pp_command = self.chatbot_preferences.pp.command.lock().await.clone();
+                        let np_command = np_command.trim();
+                        let pp_command = pp_command.trim();
                         let text = event.message.text.trim();
+                        let first_word = text.split_whitespace().next().unwrap_or("");
 
-                        let command_type = if text.starts_with(&np_command) {
+                        let command_type = if !np_command.is_empty()
+                            && first_word.eq_ignore_ascii_case(np_command)
+                        {
                             Some(CommandType::NowPlaying)
-                        } else if text.starts_with(&pp_command) {
+                        } else if !pp_command.is_empty()
+                            && first_word.eq_ignore_ascii_case(pp_command)
+                        {
                             Some(CommandType::PerformancePoints)
                         } else {
                             None
