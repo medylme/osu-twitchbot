@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -289,14 +290,14 @@ struct WrappedStorageOffsets {
 }
 
 #[derive(Clone)]
-pub struct LazerReader<'a> {
+pub struct LazerReader {
     offsets: Offsets,
-    process: &'a ProcessMemory,
+    process: Arc<ProcessMemory>,
     game_base: usize,
     mod_vtable_map: HashMap<usize, String>,
 }
 
-impl<'a> LazerReader<'a> {
+impl LazerReader {
     pub fn new(
         pid: u32,
         offsets_json: &str,
@@ -404,7 +405,7 @@ impl<'a> LazerReader<'a> {
 
         log_debug!("memory-lazer", "Found game base at: 0x{:X}", game_base);
 
-        let process = Box::leak(Box::new(process));
+        let process = Arc::new(process);
 
         Ok(Self {
             offsets,
@@ -472,7 +473,7 @@ impl<'a> LazerReader<'a> {
 
     fn read_mods_from_score_info(&self, score_info: usize) -> Option<GameplayMods> {
         let mods_json_addr = score_info + self.offsets.score_info.mods_json;
-        let mods_json = read_csharp_string(self.process, mods_json_addr).ok()?;
+        let mods_json = read_csharp_string(&self.process, mods_json_addr).ok()?;
 
         if mods_json.is_empty() || mods_json == "[]" {
             return Some(GameplayMods {
@@ -605,7 +606,7 @@ impl<'a> LazerReader<'a> {
             return None;
         }
 
-        let (items, size) = read_list_or_array(self.process, list)?;
+        let (items, size) = read_list_or_array(&self.process, list)?;
 
         let mut mods = Vec::new();
         for i in 0..size {
@@ -737,15 +738,18 @@ impl<'a> LazerReader<'a> {
         };
 
         let title = if metadata != 0 {
-            read_csharp_string(self.process, metadata + self.offsets.beatmap_metadata.title)
-                .unwrap_or_else(|_| "?".to_string())
+            read_csharp_string(
+                &self.process,
+                metadata + self.offsets.beatmap_metadata.title,
+            )
+            .unwrap_or_else(|_| "?".to_string())
         } else {
             "?".to_string()
         };
 
         let artist = if metadata != 0 {
             read_csharp_string(
-                self.process,
+                &self.process,
                 metadata + self.offsets.beatmap_metadata.artist,
             )
             .unwrap_or_else(|_| "?".to_string())
@@ -754,20 +758,20 @@ impl<'a> LazerReader<'a> {
         };
 
         let difficulty_name = read_csharp_string(
-            self.process,
+            &self.process,
             beatmap_info + self.offsets.beatmap_info.difficulty_name,
         )
         .unwrap_or_else(|_| "?".to_string());
 
         let creator = if author != 0 {
-            read_csharp_string(self.process, author + self.offsets.realm_user.username)
+            read_csharp_string(&self.process, author + self.offsets.realm_user.username)
                 .unwrap_or_else(|_| "?".to_string())
         } else {
             "?".to_string()
         };
 
         if self.mod_vtable_map.is_empty() {
-            self.mod_vtable_map = build_mod_mapping(self.process, self.game_base, &self.offsets);
+            self.mod_vtable_map = build_mod_mapping(&self.process, self.game_base, &self.offsets);
         }
 
         let mods = self.read_mods_for_screen();
@@ -789,7 +793,7 @@ impl<'a> LazerReader<'a> {
 
     fn read_beatmap_file_info(&self, beatmap_info: usize) -> (Option<String>, Option<String>) {
         let hash = if self.offsets.beatmap_info.hash != 0 {
-            read_csharp_string(self.process, beatmap_info + self.offsets.beatmap_info.hash).ok()
+            read_csharp_string(&self.process, beatmap_info + self.offsets.beatmap_info.hash).ok()
         } else {
             None
         };
@@ -834,7 +838,7 @@ impl<'a> LazerReader<'a> {
         }
 
         if self.offsets.storage.base_path != 0 {
-            read_csharp_string(self.process, underlying + self.offsets.storage.base_path).ok()
+            read_csharp_string(&self.process, underlying + self.offsets.storage.base_path).ok()
         } else {
             None
         }

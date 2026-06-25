@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
@@ -168,15 +170,15 @@ struct RulesetOffsets {
 }
 
 #[derive(Clone)]
-pub struct StableReader<'a> {
+pub struct StableReader {
     offsets: Offsets,
-    process: &'a ProcessMemory,
+    process: Arc<ProcessMemory>,
     base_addr: usize,
     ruleset_addr: usize,
     menu_mods_addr: usize,
 }
 
-impl<'a> StableReader<'a> {
+impl StableReader {
     pub fn new(
         pid: u32,
         offsets_json: &str,
@@ -247,7 +249,7 @@ impl<'a> StableReader<'a> {
 
         Ok(Self {
             offsets,
-            process: Box::leak(Box::new(process)),
+            process: Arc::new(process),
             base_addr,
             ruleset_addr,
             menu_mods_addr,
@@ -410,21 +412,21 @@ impl<'a> StableReader<'a> {
             _ => BeatmapStatus::Unknown,
         };
 
-        let artist = read_stable_string(self.process, beatmap + self.offsets.beatmap.artist)
+        let artist = read_stable_string(&self.process, beatmap + self.offsets.beatmap.artist)
             .unwrap_or_else(|_| "?".to_string());
 
-        let title = read_stable_string(self.process, beatmap + self.offsets.beatmap.title)
+        let title = read_stable_string(&self.process, beatmap + self.offsets.beatmap.title)
             .unwrap_or_else(|_| "?".to_string());
 
         let difficulty_name =
-            read_stable_string(self.process, beatmap + self.offsets.beatmap.difficulty)
+            read_stable_string(&self.process, beatmap + self.offsets.beatmap.difficulty)
                 .unwrap_or_else(|_| "?".to_string());
 
-        let creator = read_stable_string(self.process, beatmap + self.offsets.beatmap.creator)
+        let creator = read_stable_string(&self.process, beatmap + self.offsets.beatmap.creator)
             .unwrap_or_else(|_| "?".to_string());
 
-        let folder = read_stable_string(self.process, beatmap + self.offsets.beatmap.folder).ok();
-        let file = read_stable_string(self.process, beatmap + self.offsets.beatmap.file).ok();
+        let folder = read_stable_string(&self.process, beatmap + self.offsets.beatmap.folder).ok();
+        let file = read_stable_string(&self.process, beatmap + self.offsets.beatmap.file).ok();
 
         let osu_file_path = match (folder, file) {
             (Some(f), Some(n)) if !f.is_empty() && !n.is_empty() => {
