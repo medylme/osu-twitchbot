@@ -1,9 +1,11 @@
 use std::path::Path;
 
-use rosu_pp::{Beatmap, Performance};
+use rosu_mods::{Acronym, GameModIntermode, GameMode, GameModsIntermode};
+use rosu_pp::{Beatmap, Difficulty, Performance};
 use thiserror::Error;
 
 use super::core::GameplayMods;
+use crate::log_warn;
 
 #[derive(Debug, Error)]
 pub enum PpError {
@@ -41,34 +43,48 @@ fn load_beatmap(local_path: Option<&str>, songs_folder: Option<&str>) -> Result<
     Ok(std::fs::read(&full_path)?)
 }
 
-fn mods_to_bitflag(mods: &Option<GameplayMods>) -> u32 {
+fn build_mods(mods: &Option<GameplayMods>) -> GameModsIntermode {
+    let mut intermode = GameModsIntermode::new();
+
     let Some(gameplay_mods) = mods else {
-        return 0;
+        return intermode;
     };
 
-    let mut bits = 0u32;
-
     for mod_info in &gameplay_mods.mods {
-        bits |= match mod_info.acronym.as_str() {
-            "NF" => 1 << 0,           // NoFail
-            "EZ" => 1 << 1,           // Easy
-            "TD" => 1 << 2,           // TouchDevice
-            "HD" => 1 << 3,           // Hidden
-            "HR" => 1 << 4,           // HardRock
-            "SD" => 1 << 5,           // SuddenDeath
-            "DT" => 1 << 6,           // DoubleTime
-            "RX" => 1 << 7,           // Relax
-            "HT" => 1 << 8,           // HalfTime
-            "NC" => 1 << 6 | 1 << 9,  // Nightcore (/DT)
-            "FL" => 1 << 10,          // Flashlight
-            "SO" => 1 << 12,          // SpunOut
-            "AP" => 1 << 13,          // Autopilot
-            "PF" => 1 << 5 | 1 << 14, // Perfect (/SD)
-            _ => 0,
+        let Ok(acronym) = mod_info.acronym.parse::<Acronym>() else {
+            log_warn!(
+                "osu",
+                "Ignoring invalid mod acronym in pp calculation: {}",
+                mod_info.acronym
+            );
+            continue;
         };
+
+        let gamemod = GameModIntermode::from_acronym(acronym);
+        if matches!(gamemod, GameModIntermode::Unknown(_)) {
+            log_warn!(
+                "osu",
+                "Ignoring unknown mod in pp calculation: {}",
+                mod_info.acronym
+            );
+            continue;
+        }
+
+        intermode.insert(gamemod);
     }
 
-    bits
+    intermode
+}
+
+// the intermode set only carries legacy clock rates, so convert to
+// mode-specific mods where lazer rate mods like DC are honored
+fn game_mode(beatmap: &Beatmap) -> GameMode {
+    match beatmap.mode as u8 {
+        1 => GameMode::Taiko,
+        2 => GameMode::Catch,
+        3 => GameMode::Mania,
+        _ => GameMode::Osu,
+    }
 }
 
 pub fn get_pp_spread(
@@ -79,43 +95,91 @@ pub fn get_pp_spread(
     let osu_file = load_beatmap(local_path, songs_folder)?;
     let beatmap = Beatmap::from_bytes(&osu_file).map_err(|e| PpError::Parse(e.to_string()))?;
 
-    let mod_bits = mods_to_bitflag(mods);
+    let game_mods = build_mods(mods).with_mode(game_mode(&beatmap));
+    let difficulty = Difficulty::new().mods(game_mods);
 
-    let pp_95 = Performance::new(&beatmap)
-        .mods(mod_bits)
-        .accuracy(95.0)
-        .calculate()
-        .pp();
-
-    let pp_97 = Performance::new(&beatmap)
-        .mods(mod_bits)
-        .accuracy(97.0)
-        .calculate()
-        .pp();
-
-    let pp_98 = Performance::new(&beatmap)
-        .mods(mod_bits)
-        .accuracy(98.0)
-        .calculate()
-        .pp();
-
-    let pp_99 = Performance::new(&beatmap)
-        .mods(mod_bits)
-        .accuracy(99.0)
-        .calculate()
-        .pp();
-
-    let pp_100 = Performance::new(&beatmap)
-        .mods(mod_bits)
-        .accuracy(100.0)
-        .calculate()
-        .pp();
+    let pp_at = |accuracy: f64| {
+        Performance::new(&beatmap)
+            .difficulty(difficulty.clone())
+            .accuracy(accuracy)
+            .calculate()
+            .pp()
+    };
 
     Ok(PpValues {
-        pp_95,
-        pp_97,
-        pp_98,
-        pp_99,
-        pp_100,
+        pp_95: pp_at(95.0),
+        pp_97: pp_at(97.0),
+        pp_98: pp_at(98.0),
+        pp_99: pp_at(99.0),
+        pp_100: pp_at(100.0),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::core::ModInfo;
+    use super::*;
+
+    const TEST_MAP: &str = "osu file format v14
+
+[General]
+Mode: 0
+
+[Difficulty]
+HPDrainRate:5
+CircleSize:4
+OverallDifficulty:8
+ApproachRate:9
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[TimingPoints]
+0,500,4,2,0,100,1,0
+
+[HitObjects]
+64,64,0,1,0,0:0:0:0
+192,64,250,1,0,0:0:0:0
+320,64,500,1,0,0:0:0:0
+448,64,750,1,0,0:0:0:0
+64,192,1000,1,0,0:0:0:0
+192,192,1250,1,0,0:0:0:0
+320,192,1500,1,0,0:0:0:0
+448,192,1750,1,0,0:0:0:0
+";
+
+    fn pp_with(acronyms: &[&str]) -> f64 {
+        let beatmap = Beatmap::from_bytes(TEST_MAP.as_bytes()).unwrap();
+        let mods = Some(GameplayMods {
+            mods: acronyms
+                .iter()
+                .map(|a| ModInfo {
+                    acronym: (*a).to_string(),
+                    settings: None,
+                })
+                .collect(),
+            mods_string: String::new(),
+        });
+
+        Performance::new(&beatmap)
+            .difficulty(Difficulty::new().mods(build_mods(&mods).with_mode(game_mode(&beatmap))))
+            .accuracy(100.0)
+            .calculate()
+            .pp()
+    }
+
+    #[test]
+    fn double_time_raises_pp() {
+        assert!(pp_with(&["DT"]) > pp_with(&[]));
+    }
+
+    #[test]
+    fn daycore_lowers_pp() {
+        // lazer-only mod; the old legacy bitmask silently dropped it
+        assert!(pp_with(&["DC"]) < pp_with(&[]));
+    }
+
+    #[test]
+    fn unknown_mods_are_ignored() {
+        assert_eq!(pp_with(&["ZZ"]), pp_with(&[]));
+    }
 }
