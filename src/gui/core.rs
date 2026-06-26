@@ -86,6 +86,7 @@ pub struct State {
     twitch_cmd_tx: mpsc::Sender<TwitchCommand>,
     pub twitch_cmd_rx: CommandReceiver<TwitchCommand>,
     log_entries: VecDeque<LogEntry>,
+    prefs: PreferencesStore,
 }
 
 impl State {
@@ -151,6 +152,7 @@ impl State {
             twitch_cmd_tx,
             twitch_cmd_rx,
             log_entries: VecDeque::new(),
+            prefs,
         }
     }
 
@@ -634,7 +636,7 @@ impl State {
             }
             Message::AutoConnectToggled(value) => {
                 self.auto_connect_value = value;
-                if let Err(e) = PreferencesStore::set_auto_connect(value) {
+                if let Err(e) = self.prefs.set_auto_connect(value) {
                     log_warn!("gui", "Failed to save auto-connect preference: {}", e);
                 }
             }
@@ -705,7 +707,7 @@ impl State {
             Message::NpCommandChanged(value) => {
                 log_debug!("gui", "Changed np_command to {}", value);
                 self.np_command = value;
-                if let Err(e) = PreferencesStore::set_np_command(self.np_command.clone()) {
+                if let Err(e) = self.prefs.set_np_command(self.np_command.clone()) {
                     log_warn!("gui", "Failed to save np_command: {}", e);
                 }
                 let _ = self
@@ -720,7 +722,7 @@ impl State {
             Message::NpFormatChanged(value) => {
                 log_debug!("gui", "Changed np_format to {}", value);
                 self.np_format = value;
-                if let Err(e) = PreferencesStore::set_np_format(self.np_format.clone()) {
+                if let Err(e) = self.prefs.set_np_format(self.np_format.clone()) {
                     log_warn!("gui", "Failed to save np_format: {}", e);
                 }
                 let _ = self
@@ -735,7 +737,7 @@ impl State {
             Message::ResetNpCommand => {
                 log_debug!("gui", "Reset np_command to default");
                 self.np_command = DEFAULT_NP_COMMAND.to_string();
-                if let Err(e) = PreferencesStore::set_np_command(self.np_command.clone()) {
+                if let Err(e) = self.prefs.set_np_command(self.np_command.clone()) {
                     log_warn!("gui", "Failed to save np_command: {}", e);
                 }
                 let _ = self
@@ -750,7 +752,7 @@ impl State {
             Message::ResetNpFormat => {
                 log_debug!("gui", "Reset np_format to default");
                 self.np_format = DEFAULT_NP_FORMAT.to_string();
-                if let Err(e) = PreferencesStore::set_np_format(self.np_format.clone()) {
+                if let Err(e) = self.prefs.set_np_format(self.np_format.clone()) {
                     log_warn!("gui", "Failed to save np_format: {}", e);
                 }
                 let _ = self
@@ -765,7 +767,7 @@ impl State {
             Message::PpCommandChanged(value) => {
                 log_debug!("gui", "Changed pp_command to {}", value);
                 self.pp_command = value;
-                if let Err(e) = PreferencesStore::set_pp_command(self.pp_command.clone()) {
+                if let Err(e) = self.prefs.set_pp_command(self.pp_command.clone()) {
                     log_warn!("gui", "Failed to save pp_command: {}", e);
                 }
                 let _ = self
@@ -780,7 +782,7 @@ impl State {
             Message::PpFormatChanged(value) => {
                 log_debug!("gui", "Changed pp_format to {}", value);
                 self.pp_format = value;
-                if let Err(e) = PreferencesStore::set_pp_format(self.pp_format.clone()) {
+                if let Err(e) = self.prefs.set_pp_format(self.pp_format.clone()) {
                     log_warn!("gui", "Failed to save pp_format: {}", e);
                 }
                 let _ = self
@@ -795,7 +797,7 @@ impl State {
             Message::ResetPpCommand => {
                 log_debug!("gui", "Reset pp_command to default");
                 self.pp_command = DEFAULT_PP_COMMAND.to_string();
-                if let Err(e) = PreferencesStore::set_pp_command(self.pp_command.clone()) {
+                if let Err(e) = self.prefs.set_pp_command(self.pp_command.clone()) {
                     log_warn!("gui", "Failed to save pp_command: {}", e);
                 }
                 let _ = self
@@ -810,7 +812,7 @@ impl State {
             Message::ResetPpFormat => {
                 log_debug!("gui", "Reset pp_format to default");
                 self.pp_format = DEFAULT_PP_FORMAT.to_string();
-                if let Err(e) = PreferencesStore::set_pp_format(self.pp_format.clone()) {
+                if let Err(e) = self.prefs.set_pp_format(self.pp_format.clone()) {
                     log_warn!("gui", "Failed to save pp_format: {}", e);
                 }
                 let _ = self

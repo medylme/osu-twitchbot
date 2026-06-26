@@ -123,33 +123,28 @@ impl PreferencesStore {
         &self.config.pp_format
     }
 
-    pub fn set_auto_connect(value: bool) -> Result<(), PreferencesError> {
-        let mut store = Self::load_or_default();
-        store.config.auto_connect = value;
-        store.save()
+    pub fn set_auto_connect(&mut self, value: bool) -> Result<(), PreferencesError> {
+        self.config.auto_connect = value;
+        self.save()
     }
 
-    pub fn set_np_command(value: String) -> Result<(), PreferencesError> {
-        let mut store = Self::load_or_default();
-        store.config.np_command = value;
-        store.save()
+    pub fn set_np_command(&mut self, value: String) -> Result<(), PreferencesError> {
+        self.config.np_command = value;
+        self.save()
     }
 
-    pub fn set_np_format(value: String) -> Result<(), PreferencesError> {
-        let mut store = Self::load_or_default();
-        store.config.np_format = value;
-        store.save()
+    pub fn set_np_format(&mut self, value: String) -> Result<(), PreferencesError> {
+        self.config.np_format = value;
+        self.save()
     }
 
-    pub fn set_pp_command(value: String) -> Result<(), PreferencesError> {
-        let mut store = Self::load_or_default();
-        store.config.pp_command = value;
-        store.save()
+    pub fn set_pp_command(&mut self, value: String) -> Result<(), PreferencesError> {
+        self.config.pp_command = value;
+        self.save()
     }
 
-    pub fn set_pp_format(value: String) -> Result<(), PreferencesError> {
-        let mut store = Self::load_or_default();
-        store.config.pp_format = value;
-        store.save()
+    pub fn set_pp_format(&mut self, value: String) -> Result<(), PreferencesError> {
+        self.config.pp_format = value;
+        self.save()
     }
 }
