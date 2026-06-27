@@ -742,6 +742,22 @@ impl TwitchClient {
             return Err(format!("Failed to send chat message: {}", error_text).into());
         }
 
+        // a 2xx can still mean the message was dropped (automod, follower-only
+        // mode, duplicate); twitch reports this via is_sent + drop_reason
+        let response_body: serde_json::Value = response.json().await.unwrap_or_default();
+        let sent_message = response_body.get("data").and_then(|d| d.get(0));
+        if let Some(sent_message) = sent_message
+            && sent_message.get("is_sent").and_then(|v| v.as_bool()) == Some(false)
+        {
+            let drop_reason = sent_message
+                .get("drop_reason")
+                .and_then(|r| r.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown reason");
+            log_warn!("twitch", "Chat message was dropped: {}", drop_reason);
+            return Ok(());
+        }
+
         log_debug!("twitch", "Sent response to channel '{}'", channel_id);
         Ok(())
     }
