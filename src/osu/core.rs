@@ -8,6 +8,9 @@ use tokio::sync::mpsc;
 use crate::log_debug;
 
 pub const DATA_POLLING_INTERVAL_MS: u64 = 100;
+// brief read failures happen during screen transitions; only tear the reader
+// down once they persist (e.g. the process actually exited)
+pub const MAX_CONSECUTIVE_READ_FAILURES: u32 = 10;
 
 #[derive(Debug)]
 pub enum OsuCommand {
@@ -234,10 +237,12 @@ mod platform {
             };
 
             if result < 0 {
-                return Err(MemoryError::ReadFailed(format!(
-                    "pread failed: {}",
-                    std::io::Error::last_os_error()
-                )));
+                let err = std::io::Error::last_os_error();
+                // ptrace_scope denies at read time on some kernels
+                if matches!(err.raw_os_error(), Some(libc::EPERM | libc::EACCES)) {
+                    return Err(MemoryError::AccessDenied);
+                }
+                return Err(MemoryError::ReadFailed(format!("pread failed: {}", err)));
             }
 
             if (result as usize) != size {
@@ -362,10 +367,16 @@ impl ProcessMemory {
 
                 let size = end - start;
 
-                if let Ok(data) = self.read_bytes(start, size)
-                    && let Some(offset) = find_pattern(&data, pattern, mask)
-                {
-                    return Ok(start + offset);
+                match self.read_bytes(start, size) {
+                    Ok(data) => {
+                        if let Some(offset) = find_pattern(&data, pattern, mask) {
+                            return Ok(start + offset);
+                        }
+                    }
+                    // surface permission failures instead of a misleading
+                    // PatternNotFound so the ptrace hint fires
+                    Err(MemoryError::AccessDenied) => return Err(MemoryError::AccessDenied),
+                    Err(_) => {}
                 }
             }
         }

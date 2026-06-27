@@ -6,8 +6,9 @@ use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
 use super::core::{
-    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods, MemoryError, MemoryEvent,
-    ModInfo, OsuCommand, OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint,
+    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods,
+    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuCommand, OsuStatus,
+    ProcessMemory, order_mods, parse_pattern, privilege_hint,
 };
 use crate::{log_debug, log_error, log_info, log_warn};
 
@@ -95,6 +96,7 @@ pub async fn run_lazer_reader(
 
     let mut interval = time::interval(Duration::from_millis(DATA_POLLING_INTERVAL_MS));
     let mut last_beatmap_id: Option<i32> = None;
+    let mut consecutive_failures: u32 = 0;
 
     loop {
         tokio::select! {
@@ -102,8 +104,7 @@ pub async fn run_lazer_reader(
                 let result = {
                     let mut r = reader.clone();
                     tokio::task::spawn_blocking(move || {
-                        let res = r.read_beatmap()
-                            .map_err(|e| MemoryError::ReadFailed(e.to_string()));
+                        let res = r.read_beatmap();
                         (res, r.mod_vtable_map)
                     })
                     .await
@@ -111,6 +112,7 @@ pub async fn run_lazer_reader(
 
                 match result {
                     Ok((Ok(beatmap), vtable_map)) => {
+                        consecutive_failures = 0;
                         if reader.mod_vtable_map.is_empty() && !vtable_map.is_empty() {
                             reader.mod_vtable_map = vtable_map;
                         }
@@ -124,22 +126,21 @@ pub async fn run_lazer_reader(
                         }
                     }
                     Ok((Err(e), _)) => {
-                        let error_str = e.to_string();
-
-                        if error_str.contains("no beatmap")
-                            || error_str.contains("not initialized")
-                            || error_str.contains("null")
-                            || error_str.contains("invalid")
-                        {
-                            if current_beatmap.is_some() {
-                                *current_beatmap = None;
-                                let _ = tx.send(MemoryEvent::BeatmapChanged(None)).await;
-                                last_beatmap_id = None;
-                            }
-                            continue;
+                        if matches!(e, MemoryError::ProcessNotFound | MemoryError::AccessDenied) {
+                            return Err(e);
                         }
 
-                        return Err(e);
+                        consecutive_failures += 1;
+                        log_debug!(
+                            "memory-lazer",
+                            "Beatmap read failed ({}/{}): {}",
+                            consecutive_failures,
+                            MAX_CONSECUTIVE_READ_FAILURES,
+                            e
+                        );
+                        if consecutive_failures >= MAX_CONSECUTIVE_READ_FAILURES {
+                            return Err(e);
+                        }
                     }
                     Err(e) => {
                         return Err(MemoryError::ReadFailed(format!("Task panic: {}", e)));
@@ -327,6 +328,9 @@ impl LazerReader {
             }
             Err(e) => {
                 log_error!("memory-lazer", "Failed to find pattern: {}", e);
+                if matches!(e, MemoryError::AccessDenied) {
+                    log_warn!("memory-lazer", "{}", privilege_hint());
+                }
                 return Err(Box::new(e));
             }
         };

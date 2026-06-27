@@ -5,8 +5,9 @@ use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
 use super::core::{
-    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods, MemoryError, MemoryEvent,
-    ModInfo, OsuCommand, OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint,
+    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods,
+    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuCommand, OsuStatus,
+    ProcessMemory, order_mods, parse_pattern, privilege_hint,
 };
 use crate::{log_debug, log_error, log_warn};
 
@@ -46,22 +47,19 @@ pub async fn run_stable_reader(
 
     let mut interval = time::interval(Duration::from_millis(DATA_POLLING_INTERVAL_MS));
     let mut last_beatmap_id: Option<i32> = None;
+    let mut consecutive_failures: u32 = 0;
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
                 let result = {
                     let mut reader = reader.clone();
-                    tokio::task::spawn_blocking(move || {
-                        reader
-                            .read_beatmap()
-                            .map_err(|e| MemoryError::ReadFailed(e.to_string()))
-                    })
-                    .await
+                    tokio::task::spawn_blocking(move || reader.read_beatmap()).await
                 };
 
                 match result {
                     Ok(Ok(mut beatmap)) => {
+                        consecutive_failures = 0;
                         beatmap.songs_folder = songs_folder.clone();
 
                         let mods_changed =
@@ -75,22 +73,21 @@ pub async fn run_stable_reader(
                         }
                     }
                     Ok(Err(e)) => {
-                        let error_str = e.to_string();
-
-                        if error_str.contains("no beatmap")
-                            || error_str.contains("not initialized")
-                            || error_str.contains("null")
-                            || error_str.contains("invalid")
-                        {
-                            if current_beatmap.is_some() {
-                                *current_beatmap = None;
-                                let _ = tx.send(MemoryEvent::BeatmapChanged(None)).await;
-                                last_beatmap_id = None;
-                            }
-                            continue;
+                        if matches!(e, MemoryError::ProcessNotFound | MemoryError::AccessDenied) {
+                            return Err(e);
                         }
 
-                        return Err(e);
+                        consecutive_failures += 1;
+                        log_debug!(
+                            "memory-stable",
+                            "Beatmap read failed ({}/{}): {}",
+                            consecutive_failures,
+                            MAX_CONSECUTIVE_READ_FAILURES,
+                            e
+                        );
+                        if consecutive_failures >= MAX_CONSECUTIVE_READ_FAILURES {
+                            return Err(e);
+                        }
                     }
                     Err(e) => {
                         return Err(MemoryError::ReadFailed(format!("Task panic: {}", e)));
@@ -169,6 +166,28 @@ struct RulesetOffsets {
     mods_xor2: usize,
 }
 
+fn scan_pattern(
+    process: &ProcessMemory,
+    name: &str,
+    pattern_str: &str,
+) -> Result<usize, MemoryError> {
+    log_debug!("memory-stable", "Scanning for {} pattern...", name);
+    let (pattern, mask) = parse_pattern(pattern_str);
+    match process.pattern_scan(&pattern, &mask) {
+        Ok(addr) => {
+            log_debug!("memory-stable", "Found {} pattern at: 0x{:X}", name, addr);
+            Ok(addr)
+        }
+        Err(e) => {
+            log_error!("memory-stable", "Failed to find {} pattern: {}", name, e);
+            if matches!(e, MemoryError::AccessDenied) {
+                log_warn!("memory-stable", "{}", privilege_hint());
+            }
+            Err(e)
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct StableReader {
     offsets: Offsets,
@@ -197,47 +216,9 @@ impl StableReader {
             }
         };
 
-        log_debug!("memory-stable", "Scanning for base address pattern...");
-
-        let (base_pattern, base_mask) = parse_pattern(&offsets.patterns.base);
-        let base_addr = match process.pattern_scan(&base_pattern, &base_mask) {
-            Ok(addr) => {
-                log_debug!("memory-stable", "Found base pattern at: 0x{:X}", addr);
-                addr
-            }
-            Err(e) => {
-                log_error!("memory-stable", "Failed to find base pattern: {}", e);
-                return Err(Box::new(e));
-            }
-        };
-
-        log_debug!("memory-stable", "Scanning for ruleset pattern...");
-
-        let (ruleset_pattern, ruleset_mask) = parse_pattern(&offsets.patterns.ruleset);
-        let ruleset_addr = match process.pattern_scan(&ruleset_pattern, &ruleset_mask) {
-            Ok(addr) => {
-                log_debug!("memory-stable", "Found ruleset pattern at: 0x{:X}", addr);
-                addr
-            }
-            Err(e) => {
-                log_error!("memory-stable", "Failed to find ruleset pattern: {}", e);
-                return Err(Box::new(e));
-            }
-        };
-
-        log_debug!("memory-stable", "Scanning for menu mods pattern...");
-
-        let (menu_mods_pattern, menu_mods_mask) = parse_pattern(&offsets.patterns.menu_mods);
-        let menu_mods_addr = match process.pattern_scan(&menu_mods_pattern, &menu_mods_mask) {
-            Ok(addr) => {
-                log_debug!("memory-stable", "Found menu mods pattern at: 0x{:X}", addr);
-                addr
-            }
-            Err(e) => {
-                log_error!("memory-stable", "Failed to find menu mods pattern: {}", e);
-                return Err(Box::new(e));
-            }
-        };
+        let base_addr = scan_pattern(&process, "base", &offsets.patterns.base)?;
+        let ruleset_addr = scan_pattern(&process, "ruleset", &offsets.patterns.ruleset)?;
+        let menu_mods_addr = scan_pattern(&process, "menu mods", &offsets.patterns.menu_mods)?;
 
         log_debug!(
             "memory-stable",

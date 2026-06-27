@@ -261,6 +261,9 @@ async fn osu_worker() {
 
         if let Err(e) = result {
             log_error!("osu", "Memory reader error: {:#?}", e);
+            if matches!(e, osu::core::MemoryError::AccessDenied) {
+                log_warn!("osu", "{}", osu::core::privilege_hint());
+            }
         }
 
         current_beatmap = None;
