@@ -11,7 +11,7 @@ use tokio::time::{self, Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::osu::core::{MemoryEvent, OsuCommand};
+use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand};
 use crate::osu::pp::get_pp_spread;
 use crate::placeholders::Placeholders;
 use crate::{log_debug, log_error, log_info, log_warn};
@@ -90,11 +90,6 @@ impl Display for CommandType {
             CommandType::PerformancePoints => write!(f, "pp"),
         }
     }
-}
-
-struct PendingRequest {
-    message_id: String,
-    command_type: CommandType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -462,7 +457,11 @@ impl TwitchClient {
         let keepalive_duration = Duration::from_secs(SOCKET_KEEPALIVE_SECONDS);
         let mut last_message = Instant::now();
 
-        let mut pending_request: Option<PendingRequest> = None;
+        // commands answer from this snapshot instead of a per-command round-trip,
+        // so concurrent viewer commands can't misroute replies
+        let mut latest_beatmap: Option<BeatmapData> = None;
+        let _ = osu_tx.send(OsuCommand::RequestBeatmapData).await;
+
         let mut last_command_time: Option<Instant> = None;
         let rate_limit_duration = Duration::from_secs(1);
 
@@ -483,8 +482,7 @@ impl TwitchClient {
                                     drop(read);
                                     if let Err(e) = self.handle_eventsub_message(
                                         &text,
-                                        osu_tx.clone(),
-                                        &mut pending_request,
+                                        &latest_beatmap,
                                         &mut last_command_time,
                                         rate_limit_duration,
                                     ).await {
@@ -534,68 +532,36 @@ impl TwitchClient {
                     drop(read);
 
                     match osu_event {
-                        MemoryEvent::BeatmapDataResponse(Some(beatmap_data)) => {
-                            log_debug!("twitch", "Received beatmap data response for: {} - {}", beatmap_data.artist, beatmap_data.title);
-
-                            if let Some(request) = pending_request.take() {
-                                let message = match request.command_type {
-                                    CommandType::NowPlaying => {
-                                        let format_template = self.chatbot_preferences.np.format.lock().await.clone();
-                                        Placeholders::from_beatmap(&beatmap_data).apply_np(&format_template)
-                                    }
-                                    CommandType::PerformancePoints => {
-                                        let pp_format_template = self.chatbot_preferences.pp.format.lock().await.clone();
-                                        match get_pp_spread(
-                                            &beatmap_data.mods,
-                                            beatmap_data.osu_file_path.as_deref(),
-                                            beatmap_data.songs_folder.as_deref(),
-                                        ) {
-                                            Ok(pp_values) => {
-                                                Placeholders::from_beatmap(&beatmap_data)
-                                                    .with_pp(&pp_values)
-                                                    .apply_pp(&pp_format_template)
-                                            }
-                                            Err(e) => {
-                                                log_debug!("twitch", "pp not available: {}", e);
-                                                "pp calculation currently not available".to_string()
-                                            }
-                                        }
-                                    }
-                                };
-
-                                if let Err(e) = self.send_chat_message(
-                                    &self.user.id,
-                                    &message,
-                                    Some(&request.message_id)
-                                ).await {
-                                    log_error!(
-                                        "twitch",
-                                        "Failed to send chat message: {}",
-                                        e
-                                    );
-                                }
-                            }
-                        }
-                        MemoryEvent::BeatmapDataResponse(None) => {
-                            log_debug!("twitch", "No beatmap data available");
-
-                            if let Some(request) = pending_request.take()
-                                && let Err(e) = self.send_chat_message(
-                                    &self.user.id,
-                                    "No beatmap currently selected",
-                                    Some(&request.message_id)
-                                ).await {
-                                    log_error!(
-                                        "twitch",
-                                        "Failed to send chat message: {}",
-                                        e
-                                    );
-                                }
-                        }
-                        MemoryEvent::BeatmapChanged(_) => {
-                            // beatmap changes are handled by the GUI, no action needed here
+                        MemoryEvent::BeatmapDataResponse(beatmap)
+                        | MemoryEvent::BeatmapChanged(beatmap) => {
+                            latest_beatmap = beatmap;
                         }
                         _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    async fn build_reply(&self, command_type: &CommandType, beatmap: &BeatmapData) -> String {
+        match command_type {
+            CommandType::NowPlaying => {
+                let format_template = self.chatbot_preferences.np.format.lock().await.clone();
+                Placeholders::from_beatmap(beatmap).apply_np(&format_template)
+            }
+            CommandType::PerformancePoints => {
+                let pp_format_template = self.chatbot_preferences.pp.format.lock().await.clone();
+                match get_pp_spread(
+                    &beatmap.mods,
+                    beatmap.osu_file_path.as_deref(),
+                    beatmap.songs_folder.as_deref(),
+                ) {
+                    Ok(pp_values) => Placeholders::from_beatmap(beatmap)
+                        .with_pp(&pp_values)
+                        .apply_pp(&pp_format_template),
+                    Err(e) => {
+                        log_debug!("twitch", "pp not available: {}", e);
+                        "pp calculation currently not available".to_string()
                     }
                 }
             }
@@ -605,8 +571,7 @@ impl TwitchClient {
     async fn handle_eventsub_message(
         &self,
         message: &str,
-        osu_tx: mpsc::Sender<OsuCommand>,
-        pending_request: &mut Option<PendingRequest>,
+        latest_beatmap: &Option<BeatmapData>,
         last_command_time: &mut Option<Instant>,
         rate_limit_duration: Duration,
     ) -> Result<(), BoxError> {
@@ -666,17 +631,18 @@ impl TwitchClient {
                                 event.chatter_user_name
                             );
 
-                            let osu_command = OsuCommand::RequestBeatmapData;
+                            let reply = match latest_beatmap {
+                                Some(beatmap) => self.build_reply(&cmd_type, beatmap).await,
+                                None => "No beatmap currently selected".to_string(),
+                            };
 
-                            if let Err(e) = osu_tx.send(osu_command).await {
-                                log_error!("twitch", "Failed to send osu command: {}", e);
-                            } else {
-                                *pending_request = Some(PendingRequest {
-                                    message_id: event.message_id.clone(),
-                                    command_type: cmd_type,
-                                });
-                                *last_command_time = Some(now);
+                            if let Err(e) = self
+                                .send_chat_message(&self.user.id, &reply, Some(&event.message_id))
+                                .await
+                            {
+                                log_error!("twitch", "Failed to send chat message: {}", e);
                             }
+                            *last_command_time = Some(now);
                         }
                     }
                 }

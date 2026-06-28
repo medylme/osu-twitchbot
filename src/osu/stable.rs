@@ -69,7 +69,11 @@ pub async fn run_stable_reader(
                         if beatmap_changed || mods_changed {
                             last_beatmap_id = Some(beatmap.id);
                             *current_beatmap = Some(beatmap.clone());
-                            let _ = tx.send(MemoryEvent::BeatmapChanged(Some(beatmap))).await;
+                            let event = MemoryEvent::BeatmapChanged(Some(beatmap));
+                            let _ = tx.send(event.clone()).await;
+                            // try_send: nothing drains the forward channel until
+                            // twitch connects, so an awaited send could stall reads
+                            let _ = forward_tx.try_send(event);
                         }
                     }
                     Ok(Err(e)) => {
@@ -100,7 +104,7 @@ pub async fn run_stable_reader(
                     OsuCommand::RequestBeatmapData => {
                         let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
                         let _ = tx.send(event.clone()).await;
-                        let _ = forward_tx.send(event).await;
+                        let _ = forward_tx.try_send(event);
                     }
                     OsuCommand::UpdateEventForwardSender(new_sender) => {
                         *forward_tx = new_sender;

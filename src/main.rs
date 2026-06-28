@@ -278,7 +278,7 @@ async fn osu_worker() {
                     OsuCommand::RequestBeatmapData => {
                         let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
                         let _ = tx.send(event.clone()).await;
-                        let _ = forward_tx.send(event).await;
+                        let _ = forward_tx.try_send(event);
                     }
                     OsuCommand::UpdateEventForwardSender(new_sender) => {
                         forward_tx = new_sender;
@@ -329,7 +329,8 @@ async fn osu_worker() {
         current_beatmap = None;
         let event = MemoryEvent::BeatmapChanged(None);
         let _ = tx.send(event.clone()).await;
-        let _ = forward_tx.send(event).await;
+        // try_send: nothing drains the forward channel until twitch connects
+        let _ = forward_tx.try_send(event);
 
         let _ = tx
             .send(MemoryEvent::StatusChanged(OsuStatus::Disconnected))
