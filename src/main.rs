@@ -3,11 +3,12 @@
     windows_subsystem = "windows"
 )]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use iced::futures::SinkExt;
 use iced::window;
-use iced::{Subscription, stream};
+use iced::{Element, Subscription, Task, stream};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
@@ -17,6 +18,7 @@ mod logging;
 mod osu;
 mod placeholders;
 mod preferences;
+mod tray;
 mod twitch;
 mod updater;
 
@@ -29,6 +31,7 @@ use osu::core::{
 };
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
+use tray::{TrayEvent, TrayStatus};
 use twitch::{TwitchClient, TwitchCommand, TwitchEvent, is_invalid_access_token_error};
 #[cfg(not(debug_assertions))]
 use updater::core::is_auto_update_enabled;
@@ -87,12 +90,6 @@ fn main() -> iced::Result {
 
     log_info!("main", "Starting osu-twitchbot");
 
-    let icon = window::icon::from_file_data(
-        include_bytes!("../assets/icon.png"),
-        Some(image::ImageFormat::Png),
-    )
-    .ok();
-
     // background workers run on their own runtime; they talk to the GUI purely
     // over tokio channels, so the osu/twitch/logging modules never touch iced
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -102,28 +99,76 @@ fn main() -> iced::Result {
     runtime.spawn(osu_worker());
     runtime.spawn(twitch_worker());
 
-    let result = iced::application(State::new, State::update, State::view)
+    #[cfg(feature = "tray")]
+    {
+        let status_rx = get_tray_status_channel().1.lock().unwrap().take();
+        if let Some(status_rx) = status_rx {
+            let active = tray::spawn(status_rx, get_tray_event().0.clone());
+            TRAY_ACTIVE.store(active, Ordering::Relaxed);
+            if !active {
+                log_warn!(
+                    "main",
+                    "System tray unavailable; closing the window will quit"
+                );
+            }
+        }
+    }
+
+    let result = iced::daemon(boot, State::update, view)
         .subscription(|_| {
             Subscription::batch([
                 Subscription::run(osu_event_subscription).map(Message::OsuEvent),
                 Subscription::run(twitch_event_subscription).map(Message::TwitchEvent),
                 Subscription::run(log_subscription).map(Message::LogEvent),
+                Subscription::run(tray_event_subscription).map(Message::Tray),
+                window::close_requests().map(Message::WindowCloseRequested),
             ])
         })
         .theme(theme)
-        .title(State::title)
-        .window(window::Settings {
-            icon,
-            resizable: false,
-            size: iced::Size::new(500.0, 250.0),
-            ..Default::default()
-        })
-        .centered()
+        .title(title)
         .run();
 
-    // tear down the workers once the window closes
+    // tear down the workers once the daemon exits
     drop(runtime);
     result
+}
+
+fn boot() -> (State, Task<Message>) {
+    let (_id, open) = window::open(main_window_settings());
+    (State::new(), open.map(Message::WindowOpened))
+}
+
+fn view(state: &State, _window: window::Id) -> Element<'_, Message> {
+    state.view()
+}
+
+fn title(state: &State, _window: window::Id) -> String {
+    state.title()
+}
+
+pub fn main_window_settings() -> window::Settings {
+    let icon = window::icon::from_file_data(
+        include_bytes!("../assets/icon.png"),
+        Some(image::ImageFormat::Png),
+    )
+    .ok();
+
+    window::Settings {
+        icon,
+        resizable: false,
+        size: iced::Size::new(500.0, 250.0),
+        position: window::Position::Centered,
+        // close requests are handled in update: close to tray, or quit
+        // when no tray is available
+        exit_on_close_request: false,
+        ..Default::default()
+    }
+}
+
+static TRAY_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn tray_active() -> bool {
+    TRAY_ACTIVE.load(Ordering::Relaxed)
 }
 
 /// a sender plus a one-time-takeable receiver, shared between the GUI / a
@@ -143,6 +188,9 @@ static OSU_EVENT: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
 static TWITCH_EVENT: OnceLock<Channel<TwitchEvent>> = OnceLock::new();
 // osu worker -> twitch worker (beatmap responses)
 static OSU_EVENT_FORWARD: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
+// tray thread <-> GUI
+static TRAY_EVENT: OnceLock<Channel<TrayEvent>> = OnceLock::new();
+static TRAY_STATUS: OnceLock<Channel<TrayStatus>> = OnceLock::new();
 
 fn get_osu_channel() -> &'static Channel<OsuCommand> {
     OSU_CHANNEL.get_or_init(|| new_channel(10))
@@ -162,6 +210,14 @@ fn get_twitch_event() -> &'static Channel<TwitchEvent> {
 
 fn get_osu_event_forward() -> &'static Channel<MemoryEvent> {
     OSU_EVENT_FORWARD.get_or_init(|| new_channel(10))
+}
+
+fn get_tray_event() -> &'static Channel<TrayEvent> {
+    TRAY_EVENT.get_or_init(|| new_channel(10))
+}
+
+pub fn get_tray_status_channel() -> &'static Channel<TrayStatus> {
+    TRAY_STATUS.get_or_init(|| new_channel(10))
 }
 
 /// bridge a worker's tokio event receiver into an iced subscription
@@ -194,6 +250,10 @@ fn osu_event_subscription() -> impl iced::futures::Stream<Item = MemoryEvent> {
 
 fn twitch_event_subscription() -> impl iced::futures::Stream<Item = TwitchEvent> {
     bridge(get_twitch_event(), 10)
+}
+
+fn tray_event_subscription() -> impl iced::futures::Stream<Item = TrayEvent> {
+    bridge(get_tray_event(), 10)
 }
 
 async fn osu_worker() {
@@ -421,7 +481,7 @@ async fn twitch_worker() {
     }
 }
 
-fn theme(_state: &State) -> iced::Theme {
+fn theme(_state: &State, _window: window::Id) -> iced::Theme {
     get_current_theme()
 }
 

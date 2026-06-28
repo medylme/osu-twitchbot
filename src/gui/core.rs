@@ -8,7 +8,7 @@ use iced::widget::{
     button, center_x, center_y, checkbox, column, container, rich_text, row, scrollable, span,
     text, text_input,
 };
-use iced::{Element, Fill, Font};
+use iced::{Element, Fill, Font, Task, window};
 
 use super::components::{
     BOLD_FONT, code_block_container, primary_button, primary_text_input, tab_button,
@@ -21,13 +21,15 @@ use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
 use crate::osu::pp::get_pp_spread;
 use crate::placeholders::Placeholders;
 use crate::preferences::PreferencesStore;
+use crate::tray::{TrayEvent, TrayStatus};
 use crate::twitch::{
     DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT,
     INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
     is_invalid_access_token_error,
 };
 use crate::{
-    VERSION, get_osu_channel, get_twitch_channel, log_debug, log_error, log_info, log_warn,
+    VERSION, get_osu_channel, get_tray_status_channel, get_twitch_channel, log_debug, log_error,
+    log_info, log_warn, main_window_settings, tray_active,
 };
 
 pub type CommandReceiver<T> = Arc<Mutex<Option<mpsc::Receiver<T>>>>;
@@ -63,6 +65,9 @@ pub enum Message {
     LinkClicked(String),
     OpenLogsClicked,
     OpenConfigClicked,
+    WindowOpened(window::Id),
+    WindowCloseRequested(window::Id),
+    Tray(TrayEvent),
 }
 
 const MAX_LOG_ENTRIES: usize = 500;
@@ -87,6 +92,8 @@ pub struct State {
     pub twitch_cmd_rx: CommandReceiver<TwitchCommand>,
     log_entries: VecDeque<LogEntry>,
     prefs: PreferencesStore,
+    main_window: Option<window::Id>,
+    last_tray_status: (String, String),
 }
 
 impl State {
@@ -153,6 +160,8 @@ impl State {
             twitch_cmd_rx,
             log_entries: VecDeque::new(),
             prefs,
+            main_window: None,
+            last_tray_status: (String::new(), String::new()),
         }
     }
 
@@ -626,8 +635,50 @@ impl State {
             .into()
     }
 
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        self.sync_tray();
+        task
+    }
+
+    // mirrors status changes into the tray menu, skipping no-op updates
+    fn sync_tray(&mut self) {
+        let status = (self.osu_status.to_string(), self.twitch_status.to_string());
+        if status != self.last_tray_status {
+            let _ = get_tray_status_channel().0.try_send(TrayStatus {
+                osu: status.0.clone(),
+                twitch: status.1.clone(),
+            });
+            self.last_tray_status = status;
+        }
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::WindowOpened(id) => {
+                self.main_window = Some(id);
+            }
+            Message::WindowCloseRequested(id) => {
+                if tray_active() {
+                    log_info!("gui", "Window closed to tray");
+                    self.main_window = None;
+                    return window::close(id);
+                }
+                return iced::exit();
+            }
+            Message::Tray(TrayEvent::OpenWindow) => {
+                return match self.main_window {
+                    Some(id) => window::gain_focus(id),
+                    None => {
+                        let (id, open) = window::open(main_window_settings());
+                        self.main_window = Some(id);
+                        open.map(Message::WindowOpened)
+                    }
+                };
+            }
+            Message::Tray(TrayEvent::Quit) => {
+                return iced::exit();
+            }
             Message::TabSelected(tab) => {
                 self.active_tab = tab;
             }
@@ -659,11 +710,11 @@ impl State {
                         Err(e) => {
                             self.twitch_status =
                                 TwitchStatus::Error(format!("Failed to load token: {}", e));
-                            return;
+                            return Task::none();
                         }
                     }
                 } else {
-                    return;
+                    return Task::none();
                 };
 
                 self.twitch_status = TwitchStatus::Connecting;
@@ -892,5 +943,7 @@ impl State {
                 crate::preferences::open_config_dir();
             }
         }
+
+        Task::none()
     }
 }
