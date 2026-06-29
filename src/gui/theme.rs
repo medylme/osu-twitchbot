@@ -49,9 +49,8 @@ fn detect_system_theme() -> Theme {
 
 pub struct ColorPalette {
     pub bg_primary: Color,
+    pub bg_rail: Color,
     pub bg_secondary: Color,
-    pub bg_tertiary: Color,
-    pub bg_elevated: Color,
     pub bg_input: Color,
 
     pub text_primary: Color,
@@ -63,7 +62,6 @@ pub struct ColorPalette {
     pub accent_alt: Color,
 
     pub border_subtle: Color,
-    pub border_muted: Color,
     pub border_default: Color,
 
     pub status_success: Color,
@@ -75,57 +73,53 @@ pub struct ColorPalette {
 
 pub fn dark_palette() -> ColorPalette {
     ColorPalette {
-        bg_primary: color!(0x1a1a1a),
-        bg_secondary: color!(0x2a2a2a),
-        bg_tertiary: color!(0x3a3a3a),
-        bg_elevated: color!(0x4a4a4a),
-        bg_input: color!(0x1b1b26),
+        bg_primary: color!(0x14141c),
+        bg_rail: color!(0x181820),
+        bg_secondary: color!(0x1c1c27),
+        bg_input: color!(0x23232f),
 
-        text_primary: color!(0xf5f5f6),
-        text_secondary: color!(0x888888),
-        text_muted: color!(0x666666),
-        text_on_accent: color!(0x1b1b26),
+        text_primary: color!(0xf4f4f7),
+        text_secondary: color!(0x8a8aa0),
+        text_muted: color!(0x5b5b72),
+        text_on_accent: color!(0x16121f),
 
         accent: color!(0x969eff),
-        accent_alt: color!(0xb08af5),
+        accent_alt: color!(0xb694f8),
 
-        border_subtle: color!(0x333333),
-        border_muted: color!(0x444444),
-        border_default: color!(0x666666),
+        border_subtle: color!(0x222230),
+        border_default: color!(0x2a2a3a),
 
-        status_success: color!(0x4caf50),
-        status_warning: color!(0xffc107),
-        status_error: color!(0xf44336),
-        status_info: color!(0x2196f3),
-        status_module: color!(0x69b4ff),
+        status_success: color!(0x63d2a0),
+        status_warning: color!(0xffc66d),
+        status_error: color!(0xff6b8a),
+        status_info: color!(0x69b4ff),
+        status_module: color!(0x969eff),
     }
 }
 
 pub fn light_palette() -> ColorPalette {
     ColorPalette {
-        bg_primary: color!(0xffffff),
-        bg_secondary: color!(0xf0f0f0),
-        bg_tertiary: color!(0xe5e5e5),
-        bg_elevated: color!(0xd8d8d8),
+        bg_primary: color!(0xfafafc),
+        bg_rail: color!(0xf1f1f6),
+        bg_secondary: color!(0xffffff),
         bg_input: color!(0xffffff),
 
-        text_primary: color!(0x1a1a1a),
-        text_secondary: color!(0x666666),
-        text_muted: color!(0x999999),
-        text_on_accent: color!(0xffffff),
+        text_primary: color!(0x1d1d26),
+        text_secondary: color!(0x5f5f74),
+        text_muted: color!(0x9797a8),
+        text_on_accent: color!(0x16121f),
 
-        accent: color!(0x969eff),
-        accent_alt: color!(0x7e57c2),
+        accent: color!(0x6b74e0),
+        accent_alt: color!(0x8a63d2),
 
-        border_subtle: color!(0xdddddd),
-        border_muted: color!(0xcccccc),
-        border_default: color!(0xaaaaaa),
+        border_subtle: color!(0xe6e6ee),
+        border_default: color!(0xd8d8e4),
 
-        status_success: color!(0x388e3c),
-        status_warning: color!(0xf57c00),
-        status_error: color!(0xd32f2f),
+        status_success: color!(0x2f9e6c),
+        status_warning: color!(0xc07c1d),
+        status_error: color!(0xd4486a),
         status_info: color!(0x1976d2),
-        status_module: color!(0x1565c0),
+        status_module: color!(0x6b74e0),
     }
 }
 

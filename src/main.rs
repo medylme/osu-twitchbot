@@ -155,8 +155,9 @@ pub fn main_window_settings() -> window::Settings {
 
     window::Settings {
         icon,
-        resizable: false,
-        size: iced::Size::new(500.0, 250.0),
+        resizable: true,
+        size: iced::Size::new(780.0, 470.0),
+        min_size: Some(iced::Size::new(620.0, 400.0)),
         position: window::Position::Centered,
         // close requests are handled in update: close to tray, or quit
         // when no tray is available

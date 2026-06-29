@@ -5,14 +5,14 @@ use tokio::sync::mpsc;
 
 use iced::Alignment::Center;
 use iced::widget::{
-    button, center_x, center_y, checkbox, column, container, rich_text, row, scrollable, span,
-    text, text_input,
+    button, center_x, center_y, checkbox, column, container, rich_text, row, scrollable, space,
+    span, text, text_input,
 };
 use iced::{Element, Fill, Font, Task, window};
 
 use super::components::{
-    BOLD_FONT, code_block_container, primary_button, primary_text_input, tab_button,
-    tab_button_active,
+    BOLD_FONT, MONO_BOLD_FONT, card_container, ghost_button, nav_button, nav_button_active,
+    primary_button, primary_text_input, rail_container, separator, window_container,
 };
 use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
@@ -173,46 +173,6 @@ impl State {
         let theme = get_current_theme();
         let p = palette(&theme);
 
-        let tabs = row![
-            button(text("Main").size(12))
-                .style(if self.active_tab == Tab::Main {
-                    tab_button_active
-                } else {
-                    tab_button
-                })
-                .on_press(Message::TabSelected(Tab::Main)),
-            button(text("Settings").size(12))
-                .style(if self.active_tab == Tab::Settings {
-                    tab_button_active
-                } else {
-                    tab_button
-                })
-                .on_press(Message::TabSelected(Tab::Settings)),
-            button(text("Data").size(12))
-                .style(if self.active_tab == Tab::Data {
-                    tab_button_active
-                } else {
-                    tab_button
-                })
-                .on_press(Message::TabSelected(Tab::Data)),
-            button(text("Console").size(12))
-                .style(if self.active_tab == Tab::Console {
-                    tab_button_active
-                } else {
-                    tab_button
-                })
-                .on_press(Message::TabSelected(Tab::Console)),
-        ]
-        .spacing(2)
-        .padding([5, 10]);
-
-        let tab_bar = container(tabs)
-            .width(Fill)
-            .style(move |_| container::Style {
-                background: Some(p.bg_secondary.into()),
-                ..Default::default()
-            });
-
         let content = match self.active_tab {
             Tab::Main => self.view_main_tab(&p),
             Tab::Settings => self.view_settings_tab(&p),
@@ -220,26 +180,124 @@ impl State {
             Tab::Console => self.view_console_tab(&p),
         };
 
-        let footer = self.view_footer(&p);
+        let main = column![
+            self.view_statusbar(&p),
+            container(space::horizontal())
+                .width(Fill)
+                .height(1)
+                .style(separator),
+            content,
+        ];
 
-        column![tab_bar, content, footer].into()
+        let layout = row![
+            container(self.view_rail(&p))
+                .width(168)
+                .height(Fill)
+                .style(rail_container),
+            container(space::vertical())
+                .width(1)
+                .height(Fill)
+                .style(separator),
+            main,
+        ];
+
+        container(layout)
+            .width(Fill)
+            .height(Fill)
+            .style(window_container)
+            .into()
+    }
+
+    fn view_rail(&self, p: &ColorPalette) -> Element<'_, Message> {
+        let nav_item = |label: &'static str, tab: Tab| {
+            button(text(label).size(13))
+                .width(Fill)
+                .padding([8, 12])
+                .style(if self.active_tab == tab {
+                    nav_button_active
+                } else {
+                    nav_button
+                })
+                .on_press(Message::TabSelected(tab))
+        };
+
+        let nav = column![
+            nav_item("Main", Tab::Main),
+            nav_item("Settings", Tab::Settings),
+            nav_item("Data", Tab::Data),
+            nav_item("Console", Tab::Console),
+        ]
+        .spacing(3);
+
+        let version_string = if cfg!(debug_assertions) {
+            "Dev".to_string()
+        } else {
+            format!("v{}", VERSION)
+        };
+        let version_text = text(version_string).size(11).color(p.text_muted);
+        let creator_text = rich_text![
+            span::<String, Font>("by ").color(p.text_muted),
+            span::<String, Font>("dyl")
+                .color(p.text_secondary)
+                .font(BOLD_FONT)
+                .link("https://github.com/medylme/osu-twitchbot".to_string()),
+        ]
+        .size(11)
+        .on_link_click(Message::LinkClicked);
+
+        let footer = column![version_text, creator_text]
+            .spacing(2)
+            .padding([0, 4]);
+
+        column![nav, space::vertical(), footer]
+            .height(Fill)
+            .padding(10)
+            .into()
+    }
+
+    fn view_statusbar(&self, p: &ColorPalette) -> Element<'_, Message> {
+        let osu_on = matches!(self.osu_status, OsuStatus::Connected(_));
+        let twitch_on = matches!(self.twitch_status, TwitchStatus::Connected(_));
+
+        let stat = |on: bool, label: &'static str, value: String| {
+            let dot_color = if on { p.status_success } else { p.text_muted };
+            row![
+                text("●").size(10).color(dot_color),
+                text(label).size(12).color(p.text_secondary),
+                text(value).size(12).font(BOLD_FONT).color(p.text_primary),
+            ]
+            .spacing(7)
+            .align_y(Center)
+        };
+
+        row![
+            stat(osu_on, "osu!", self.osu_status.to_string()),
+            stat(twitch_on, "Twitch", self.twitch_status.to_string()),
+        ]
+        .spacing(18)
+        .padding([10, 20])
+        .into()
+    }
+
+    fn section_title<'a>(&self, p: &ColorPalette, label: &'static str) -> Element<'a, Message> {
+        text(label)
+            .size(11)
+            .font(BOLD_FONT)
+            .color(p.text_secondary)
+            .into()
     }
 
     fn view_main_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
-        let token_label = row![
-            text("Token").size(14),
-            rich_text![
-                span::<String, Font>("("),
-                span::<String, Font>("?")
-                    .color(p.accent)
-                    .underline(true)
-                    .link("https://osu-twitchbot.dyl.blue/"),
-                span::<String, Font>(")"),
-            ]
-            .size(14)
-            .on_link_click(|_| Message::TokenHelpClicked)
+        let token_label = rich_text![
+            span::<String, Font>("Twitch token").color(p.text_secondary),
+            span::<String, Font>("   "),
+            span::<String, Font>("get one")
+                .color(p.accent)
+                .underline(true)
+                .link("https://osu-twitchbot.dyl.blue/"),
         ]
-        .spacing(5);
+        .size(12)
+        .on_link_click(|_| Message::TokenHelpClicked);
 
         let token_placeholder = if self.token_saved && self.token_input_value.is_empty() {
             "Token saved securely"
@@ -249,19 +307,24 @@ impl State {
 
         let token_text_input = text_input(token_placeholder, &self.token_input_value)
             .secure(true)
-            .size(12)
+            .size(13)
+            .padding([9, 12])
+            .font(Font::MONOSPACE)
             .style(primary_text_input)
             .on_input(Message::TokenInputChanged);
 
         let action_button = match &self.twitch_status {
-            TwitchStatus::Connected(_) => button(text("Disconnect").size(14))
+            TwitchStatus::Connected(_) => button(text("Disconnect").size(13))
                 .style(primary_button)
+                .padding([8, 16])
                 .on_press(Message::DisconnectClicked),
-            TwitchStatus::Connecting => {
-                button(text("Connecting...").size(14)).style(primary_button)
-            }
+            TwitchStatus::Connecting => button(text("Connecting...").size(13))
+                .style(primary_button)
+                .padding([8, 16]),
             TwitchStatus::Disconnected | TwitchStatus::Error(_) => {
-                let btn = button(text("Connect").size(14)).style(primary_button);
+                let btn = button(text("Connect").size(13))
+                    .style(primary_button)
+                    .padding([8, 16]);
                 if !self.token_input_value.is_empty() || self.token_saved {
                     btn.on_press(Message::ConnectClicked)
                 } else {
@@ -270,147 +333,131 @@ impl State {
             }
         };
 
-        let mut main_row = row![token_label, token_text_input, action_button]
+        let mut token_row = row![token_text_input, action_button]
             .spacing(10)
             .align_y(Center);
 
         if self.token_saved {
-            let clear_btn = button(text("Clear").size(14))
-                .style(primary_button)
+            let clear_btn = button(text("Clear").size(13))
+                .style(ghost_button)
+                .padding([8, 14])
                 .on_press(Message::ClearTokenClicked);
-            main_row = main_row.push(clear_btn);
+            token_row = token_row.push(clear_btn);
         }
 
         let auto_connect_checkbox = checkbox(self.auto_connect_value)
-            .label("Auto-connect on startup")
+            .label("Connect automatically on launch")
             .on_toggle(Message::AutoConnectToggled)
-            .size(14)
+            .size(15)
             .text_size(12);
 
-        let main_content = column![main_row, auto_connect_checkbox]
-            .spacing(10)
-            .padding(10);
+        column![
+            self.section_title(p, "Connection"),
+            column![token_label, token_row].spacing(6),
+            auto_connect_checkbox,
+        ]
+        .spacing(14)
+        .padding([22, 24])
+        .into()
+    }
 
-        let github_url = "https://github.com/medylme/osu-twitchbot";
-
-        let version_string = if cfg!(debug_assertions) {
-            "osu! twitchbot (DEV)".to_string()
-        } else {
-            format!("osu! twitchbot (v{})", VERSION)
+    #[allow(clippy::too_many_arguments)]
+    fn command_format_section<'a>(
+        &'a self,
+        p: &ColorPalette,
+        title: &'static str,
+        command_value: &'a str,
+        command_placeholder: &'static str,
+        on_command: fn(String) -> Message,
+        on_reset_command: Message,
+        format_value: &'a str,
+        format_placeholder: &'static str,
+        on_format: fn(String) -> Message,
+        on_reset_format: Message,
+        help: &'static str,
+        preview: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let field = |label: &'static str| text(label).size(12).color(p.text_secondary);
+        let reset = |msg: Message| {
+            button(text("Reset").size(11))
+                .style(ghost_button)
+                .padding([6, 12])
+                .on_press(msg)
         };
 
-        let version_text = text(version_string).size(12).color(p.text_secondary);
-        let creator_text = rich_text![
-            span::<String, Font>("Created by ").color(p.text_secondary),
-            span::<String, Font>("me").color(p.text_muted),
-            span::<String, Font>("dyl").color(p.accent).font(BOLD_FONT),
-            span::<String, Font>("me").color(p.text_muted),
-            span::<String, Font>(" • ").color(p.text_secondary),
-            span::<String, Font>("GitHub")
-                .color(p.accent)
-                .underline(true)
-                .link(github_url)
+        let command_input = text_input(command_placeholder, command_value)
+            .size(13)
+            .padding([8, 12])
+            .width(120)
+            .font(Font::MONOSPACE)
+            .style(primary_text_input)
+            .on_input(on_command);
+
+        let format_input = text_input(format_placeholder, format_value)
+            .size(13)
+            .padding([8, 12])
+            .width(Fill)
+            .font(Font::MONOSPACE)
+            .style(primary_text_input)
+            .on_input(on_format);
+
+        column![
+            self.section_title(p, title),
+            column![
+                field("Command"),
+                row![command_input, reset(on_reset_command)]
+                    .spacing(10)
+                    .align_y(Center),
+            ]
+            .spacing(5),
+            column![
+                field("Format"),
+                row![format_input, reset(on_reset_format)]
+                    .spacing(10)
+                    .align_y(Center),
+            ]
+            .spacing(5),
+            text(help).size(11).color(p.text_muted),
+            preview,
         ]
-        .size(11)
-        .on_link_click(Message::LinkClicked);
-
-        let info_section = column![version_text, creator_text]
-            .spacing(4)
-            .align_x(Center);
-
-        let full_content = column![main_content, info_section]
-            .spacing(20)
-            .align_x(Center);
-
-        center_y(center_x(full_content)).height(Fill).into()
+        .spacing(10)
+        .into()
     }
 
     fn view_settings_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
-        let np_header = text("Now Playing").size(14);
+        let np_section = self.command_format_section(
+            p,
+            "Now Playing",
+            &self.np_command,
+            DEFAULT_NP_COMMAND,
+            Message::NpCommandChanged,
+            Message::ResetNpCommand,
+            &self.np_format,
+            DEFAULT_NP_FORMAT,
+            Message::NpFormatChanged,
+            Message::ResetNpFormat,
+            "Placeholders: {artist} {title} {diff} {creator} {mods} {status} {link}",
+            self.build_np_format_preview(p),
+        );
 
-        let np_command_label = text("Command:").size(12);
-        let np_command_input = text_input(DEFAULT_NP_COMMAND, &self.np_command)
-            .size(12)
-            .width(50)
-            .style(primary_text_input)
-            .on_input(Message::NpCommandChanged);
-        let np_command_reset_btn = button(text("Reset").size(12))
-            .style(primary_button)
-            .on_press(Message::ResetNpCommand);
-        let np_command_row = row![np_command_label, np_command_input, np_command_reset_btn]
-            .spacing(10)
-            .align_y(Center);
+        let pp_section = self.command_format_section(
+            p,
+            "Performance Points",
+            &self.pp_command,
+            DEFAULT_PP_COMMAND,
+            Message::PpCommandChanged,
+            Message::ResetPpCommand,
+            &self.pp_format,
+            DEFAULT_PP_FORMAT,
+            Message::PpFormatChanged,
+            Message::ResetPpFormat,
+            "Placeholders: {mods} {pp_95} {pp_97} {pp_98} {pp_99} {pp_100}",
+            self.build_pp_format_preview(p),
+        );
 
-        let np_format_label = text("Format:").size(12);
-        let np_format_input = text_input(DEFAULT_NP_FORMAT, &self.np_format)
-            .size(12)
-            .width(Fill)
-            .style(primary_text_input)
-            .on_input(Message::NpFormatChanged);
-        let np_format_reset_btn = button(text("Reset").size(12))
-            .style(primary_button)
-            .on_press(Message::ResetNpFormat);
-        let np_format_row = row![np_format_label, np_format_input, np_format_reset_btn]
-            .spacing(10)
-            .align_y(Center);
-
-        let np_format_help = text("Available placeholders: {artist}, {title}, {diff}, {creator}, {mods}, {link}, {status}")
-            .size(11)
-            .color(p.text_secondary);
-
-        let np_format_preview = self.build_np_format_preview(p);
-
-        // PP Command section
-        let pp_header = text("Performance Points").size(14);
-
-        let pp_command_label = text("Command:").size(12);
-        let pp_command_input = text_input(DEFAULT_PP_COMMAND, &self.pp_command)
-            .size(12)
-            .width(50)
-            .style(primary_text_input)
-            .on_input(Message::PpCommandChanged);
-        let pp_command_reset_btn = button(text("Reset").size(12))
-            .style(primary_button)
-            .on_press(Message::ResetPpCommand);
-        let pp_command_row = row![pp_command_label, pp_command_input, pp_command_reset_btn]
-            .spacing(10)
-            .align_y(Center);
-
-        let pp_format_label = text("Format:").size(12);
-        let pp_format_input = text_input(DEFAULT_PP_FORMAT, &self.pp_format)
-            .size(12)
-            .width(Fill)
-            .style(primary_text_input)
-            .on_input(Message::PpFormatChanged);
-        let pp_format_reset_btn = button(text("Reset").size(12))
-            .style(primary_button)
-            .on_press(Message::ResetPpFormat);
-        let pp_format_row = row![pp_format_label, pp_format_input, pp_format_reset_btn]
-            .spacing(10)
-            .align_y(Center);
-
-        let pp_format_help =
-            text("Available placeholders: {mods}, {pp_95}, {pp_97}, {pp_98}, {pp_99}, {pp_100}")
-                .size(11)
-                .color(p.text_secondary);
-
-        let pp_format_preview = self.build_pp_format_preview(p);
-
-        let settings_content = column![
-            np_header,
-            np_command_row,
-            np_format_row,
-            np_format_help,
-            np_format_preview,
-            container(text("")).height(15),
-            pp_header,
-            pp_command_row,
-            pp_format_row,
-            pp_format_help,
-            pp_format_preview
-        ]
-        .spacing(10)
-        .padding(10);
+        let settings_content = column![np_section, pp_section]
+            .spacing(24)
+            .padding([22, 24]);
 
         scrollable(container(settings_content).width(Fill))
             .height(Fill)
@@ -418,89 +465,111 @@ impl State {
     }
 
     fn view_data_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
-        let content = match &self.current_beatmap {
-            Some(beatmap) => {
-                let mods_text = match &beatmap.mods {
-                    Some(mods) if !mods.mods_string.is_empty() => mods.mods_string.clone(),
-                    _ => "None".to_string(),
-                };
-
-                let beatmap_link = if beatmap.id <= 0 {
-                    None
-                } else {
-                    Some(format!("https://osu.ppy.sh/b/{}", beatmap.id))
-                };
-
-                let pp_spread_text = match &self.cached_pp {
-                    Some(pp) => format!(
-                        "95%: {:.0} | 97%: {:.0} | 98%: {:.0} | 99%: {:.0} | 100%: {:.0}",
-                        pp.pp_95, pp.pp_97, pp.pp_98, pp.pp_99, pp.pp_100
-                    ),
-                    None => "N/A".to_string(),
-                };
-
-                let data_rows: Vec<(&str, String)> = vec![
-                    (
-                        "ID",
-                        if beatmap.id <= 0 {
-                            "Local".to_string()
-                        } else {
-                            beatmap.id.to_string()
-                        },
-                    ),
-                    ("Artist", beatmap.artist.clone()),
-                    ("Title", beatmap.title.clone()),
-                    ("Difficulty", beatmap.difficulty_name.clone()),
-                    ("Creator", beatmap.creator.clone()),
-                    ("Status", beatmap.status.to_string()),
-                    ("Mods", mods_text),
-                    ("PP", pp_spread_text),
-                ];
-
-                let table = column(data_rows.into_iter().map(|(label, value)| {
-                    row![
-                        text(label).size(11).color(p.text_secondary).width(70),
-                        text(value).size(11).color(p.text_primary),
-                    ]
-                    .spacing(10)
-                    .into()
-                }))
-                .spacing(4);
-
-                let link_row = match &beatmap_link {
-                    Some(link) => row![
-                        text("Link").size(11).color(p.text_secondary).width(70),
-                        rich_text![
-                            span::<String, Font>(link.clone())
-                                .color(p.accent_alt)
-                                .underline(true)
-                                .link(link.clone())
-                        ]
-                        .size(11)
-                        .on_link_click(Message::LinkClicked)
-                    ]
-                    .spacing(10),
-                    None => row![
-                        text("Link").size(11).color(p.text_secondary).width(70),
-                        text("Local").size(11).color(p.text_primary)
-                    ]
-                    .spacing(10),
-                };
-
-                column![table, link_row].spacing(4).padding(10)
-            }
-            None => {
-                let no_data = text("No beatmap data available")
-                    .size(12)
-                    .color(p.text_secondary);
-
-                let hint = text("Launch osu! and select a beatmap to see data here!")
-                    .size(11)
-                    .color(p.text_muted);
-
-                column![no_data, hint].spacing(5).padding(10)
-            }
+        let Some(beatmap) = &self.current_beatmap else {
+            let no_data = text("No beatmap selected").size(13).color(p.text_secondary);
+            let hint = text("Launch osu! and select a beatmap to see data here!")
+                .size(11)
+                .color(p.text_muted);
+            let placeholder = column![no_data, hint].spacing(5).align_x(Center);
+            return center_y(center_x(placeholder)).height(Fill).into();
         };
+
+        let mods_text = match &beatmap.mods {
+            Some(mods) if !mods.mods_string.is_empty() => mods.mods_string.clone(),
+            _ => "None".to_string(),
+        };
+
+        let header = column![
+            text(beatmap.title.clone()).size(18).font(BOLD_FONT),
+            text(beatmap.artist.clone())
+                .size(13)
+                .color(p.text_secondary),
+            text(format!("[{}]", beatmap.difficulty_name))
+                .size(12)
+                .font(Font::MONOSPACE)
+                .color(p.accent),
+        ]
+        .spacing(2);
+
+        let field = |label: &'static str| text(label).size(12).color(p.text_muted).width(84);
+        let value = |v: String| text(v).size(12).font(Font::MONOSPACE).color(p.text_primary);
+
+        let link_value: Element<'_, Message> = if beatmap.id <= 0 {
+            value("Local".to_string()).into()
+        } else {
+            let link = format!("https://osu.ppy.sh/b/{}", beatmap.id);
+            rich_text![
+                span::<String, Font>(link.clone())
+                    .color(p.accent)
+                    .underline(true)
+                    .link(link)
+                    .font(Font::MONOSPACE)
+            ]
+            .size(12)
+            .on_link_click(Message::LinkClicked)
+            .into()
+        };
+
+        let details = column![
+            row![field("Creator"), value(beatmap.creator.clone())].spacing(10),
+            row![field("Status"), value(beatmap.status.to_string())].spacing(10),
+            row![field("Mods"), value(mods_text)].spacing(10),
+            row![field("Beatmap"), link_value].spacing(10),
+        ]
+        .spacing(6);
+
+        let pp_card_body: Element<'_, Message> = match &self.cached_pp {
+            Some(pp) => {
+                let cell = |acc: &'static str, value: f64, highlight: bool| {
+                    let number_color = if highlight { p.accent } else { p.text_primary };
+                    container(
+                        column![
+                            text(acc).size(11).color(p.text_secondary),
+                            rich_text![
+                                span::<String, Font>(format!("{:.0}", value))
+                                    .color(number_color)
+                                    .font(MONO_BOLD_FONT),
+                                span::<String, Font>("pp").color(p.text_muted),
+                            ]
+                            .size(16),
+                        ]
+                        .spacing(2)
+                        .align_x(Center),
+                    )
+                    .width(Fill)
+                    .align_x(Center)
+                };
+
+                row![
+                    cell("95%", pp.pp_95, false),
+                    cell("97%", pp.pp_97, false),
+                    cell("98%", pp.pp_98, false),
+                    cell("99%", pp.pp_99, false),
+                    cell("100%", pp.pp_100, true),
+                ]
+                .spacing(10)
+                .into()
+            }
+            None => text("Not available for this beatmap")
+                .size(12)
+                .color(p.text_muted)
+                .into(),
+        };
+
+        let pp_card = container(
+            column![
+                text("Performance Points").size(10).color(p.text_muted),
+                pp_card_body,
+            ]
+            .spacing(10),
+        )
+        .padding(14)
+        .width(Fill)
+        .style(card_container);
+
+        let content = column![header, details, pp_card]
+            .spacing(16)
+            .padding([22, 24]);
 
         scrollable(content).height(Fill).width(Fill).into()
     }
@@ -549,20 +618,56 @@ impl State {
         let log_box = container(inner_content)
             .height(Fill)
             .width(Fill)
-            .padding(10)
-            .style(code_block_container);
+            .padding(6)
+            .style(card_container);
 
         let open_logs_btn = button(text("Open Logs Folder").size(11))
-            .style(primary_button)
+            .style(ghost_button)
+            .padding([6, 12])
             .on_press(Message::OpenLogsClicked);
 
         let open_config_btn = button(text("Open Config Folder").size(11))
-            .style(primary_button)
+            .style(ghost_button)
+            .padding([6, 12])
             .on_press(Message::OpenConfigClicked);
 
-        column![row![open_logs_btn, open_config_btn].spacing(8), log_box]
-            .spacing(8)
-            .padding(10)
+        let head = row![
+            self.section_title(p, "Console"),
+            space::horizontal(),
+            open_logs_btn,
+            open_config_btn,
+        ]
+        .spacing(8)
+        .align_y(Center);
+
+        column![head, log_box].spacing(10).padding([16, 24]).into()
+    }
+
+    // previews render as the chat line viewers would see
+    fn chat_preview(&self, p: &ColorPalette, message_text: String) -> Element<'_, Message> {
+        let who = match &self.twitch_status {
+            TwitchStatus::Connected(user) => user.clone(),
+            _ => "bot".to_string(),
+        };
+
+        let cap = text("Preview · what chat sees")
+            .size(10)
+            .color(p.text_muted);
+        let line = rich_text![
+            span::<String, Font>(who)
+                .color(p.accent_alt)
+                .font(BOLD_FONT),
+            span::<String, Font>(": ").color(p.text_secondary),
+            span::<String, Font>(message_text)
+                .color(p.text_primary)
+                .font(Font::MONOSPACE),
+        ]
+        .size(12);
+
+        container(column![cap, line].spacing(6))
+            .padding([10, 12])
+            .width(Fill)
+            .style(card_container)
             .into()
     }
 
@@ -573,18 +678,7 @@ impl State {
             .map(Placeholders::from_beatmap)
             .unwrap_or_else(Placeholders::sample);
 
-        let preview_text = placeholders.apply_np(&self.np_format);
-
-        let preview_label = span::<String, Font>("Preview: ").color(p.text_secondary);
-        let preview_content = span::<String, Font>(preview_text).color(p.text_primary);
-
-        let preview_rich_text = rich_text![preview_label, preview_content].size(11);
-
-        container(preview_rich_text)
-            .padding(8)
-            .width(Fill)
-            .style(code_block_container)
-            .into()
+        self.chat_preview(p, placeholders.apply_np(&self.np_format))
     }
 
     fn build_pp_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
@@ -593,46 +687,7 @@ impl State {
             _ => Placeholders::sample_pp(),
         };
 
-        let preview_text = placeholders.apply_pp(&self.pp_format);
-
-        let preview_label = span::<String, Font>("Preview: ").color(p.text_secondary);
-        let preview_content = span::<String, Font>(preview_text).color(p.text_primary);
-
-        let preview_rich_text = rich_text![preview_label, preview_content].size(11);
-
-        container(preview_rich_text)
-            .padding(8)
-            .width(Fill)
-            .style(code_block_container)
-            .into()
-    }
-
-    fn view_footer(&self, p: &ColorPalette) -> Element<'_, Message> {
-        let text_primary = p.text_primary;
-        let text_muted = p.text_muted;
-        let bg_primary = p.bg_primary;
-
-        let osu_status = rich_text![
-            span::<String, Font>("osu!").color(text_primary),
-            span::<String, Font>(" | ").color(text_muted),
-            span::<String, Font>(self.osu_status.to_string()).color(text_primary),
-        ]
-        .size(12);
-        let twitch_status = rich_text![
-            span::<String, Font>("Twitch").color(text_primary),
-            span::<String, Font>(" | ").color(text_muted),
-            span::<String, Font>(self.twitch_status.to_string()).color(text_primary),
-        ]
-        .size(12);
-
-        container(column![osu_status, twitch_status])
-            .padding([5, 10])
-            .width(Fill)
-            .style(move |_| container::Style {
-                background: Some(bg_primary.into()),
-                ..Default::default()
-            })
-            .into()
+        self.chat_preview(p, placeholders.apply_pp(&self.pp_format))
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {

@@ -11,13 +11,29 @@ pub const BOLD_FONT: Font = Font {
     style: iced::font::Style::Normal,
 };
 
-pub fn primary_button(theme: &Theme, _status: button::Status) -> button::Style {
+pub const MONO_BOLD_FONT: Font = Font {
+    weight: iced::font::Weight::Bold,
+    family: iced::font::Family::Monospace,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+fn tint(base: Color, alpha: f32) -> Color {
+    Color { a: alpha, ..base }
+}
+
+pub fn primary_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => p.accent_alt,
+        button::Status::Disabled => tint(p.accent, 0.4),
+        _ => p.accent,
+    };
     button::Style {
-        background: Some(iced::Background::Color(p.accent)),
+        background: Some(background.into()),
         text_color: p.text_on_accent,
         border: Border {
-            radius: Radius::new(20.0),
+            radius: Radius::new(999.0),
             width: 0.0,
             color: Color::TRANSPARENT,
         },
@@ -26,62 +42,113 @@ pub fn primary_button(theme: &Theme, _status: button::Status) -> button::Style {
     }
 }
 
-pub fn primary_text_input(theme: &Theme, _status: text_input::Status) -> text_input::Style {
+pub fn ghost_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = palette(theme);
-    text_input::Style {
-        background: iced::Background::Color(p.bg_input),
-        border: Border {
-            radius: Radius::new(8.0),
-            width: 1.5,
-            color: p.accent,
-        },
-        icon: p.text_primary,
-        placeholder: Color {
-            a: 0.5,
-            ..p.text_primary
-        },
-        value: p.text_primary,
-        selection: Color { a: 0.3, ..p.accent },
-    }
-}
-
-pub fn tab_button(theme: &Theme, _status: button::Status) -> button::Style {
-    let p = palette(theme);
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: Some(p.bg_tertiary.into()),
-        text_color: p.text_secondary,
+        background: hovered.then(|| tint(p.text_primary, 0.05).into()),
+        text_color: if hovered {
+            p.text_primary
+        } else {
+            p.text_secondary
+        },
         border: Border {
-            color: p.border_muted,
+            radius: Radius::new(999.0),
             width: 1.0,
-            radius: 2.0.into(),
+            color: p.border_default,
         },
         ..Default::default()
     }
 }
 
-pub fn tab_button_active(theme: &Theme, _status: button::Status) -> button::Style {
+pub fn nav_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = palette(theme);
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    button::Style {
+        background: hovered.then(|| tint(p.text_primary, 0.04).into()),
+        text_color: if hovered {
+            p.text_primary
+        } else {
+            p.text_secondary
+        },
+        border: Border {
+            radius: Radius::new(9.0),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        ..Default::default()
+    }
+}
+
+pub fn nav_button_active(theme: &Theme, _status: button::Status) -> button::Style {
     let p = palette(theme);
     button::Style {
-        background: Some(p.bg_elevated.into()),
+        background: Some(tint(p.accent, 0.14).into()),
         text_color: p.text_primary,
         border: Border {
-            color: p.border_default,
-            width: 1.0,
-            radius: 2.0.into(),
+            radius: Radius::new(9.0),
+            width: 0.0,
+            color: Color::TRANSPARENT,
         },
         ..Default::default()
     }
 }
 
-pub fn code_block_container(theme: &Theme) -> container::Style {
+pub fn primary_text_input(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let p = palette(theme);
+    let border_color = match status {
+        text_input::Status::Focused { .. } => p.accent,
+        text_input::Status::Hovered => tint(p.accent, 0.55),
+        _ => p.border_default,
+    };
+    text_input::Style {
+        background: p.bg_input.into(),
+        border: Border {
+            radius: Radius::new(9.0),
+            width: 1.0,
+            color: border_color,
+        },
+        icon: p.text_primary,
+        placeholder: p.text_muted,
+        value: p.text_primary,
+        selection: tint(p.accent, 0.3),
+    }
+}
+
+pub fn card_container(theme: &Theme) -> container::Style {
     let p = palette(theme);
     container::Style {
-        background: Some(p.bg_tertiary.into()),
+        background: Some(p.bg_secondary.into()),
         border: Border {
             color: p.border_subtle,
             width: 1.0,
-            radius: 6.0.into(),
+            radius: 10.0.into(),
         },
+        ..Default::default()
+    }
+}
+
+pub fn rail_container(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(p.bg_rail.into()),
+        ..Default::default()
+    }
+}
+
+pub fn window_container(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(p.bg_primary.into()),
+        text_color: Some(p.text_primary),
+        ..Default::default()
+    }
+}
+
+pub fn separator(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(p.border_subtle.into()),
         ..Default::default()
     }
 }
