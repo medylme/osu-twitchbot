@@ -348,6 +348,9 @@ impl TwitchClient {
 
         let http_client = reqwest::Client::new();
 
+        log_debug!("twitch", "Validating access token scopes");
+        validate_token_scopes(&http_client, access_token).await?;
+
         log_debug!("twitch", "Getting user ID from access token");
         let user = get_user_id_from_access_token(&http_client, client_id, access_token).await?;
         log_debug!("twitch", "Got user: {}", user.display_name);
@@ -802,6 +805,63 @@ async fn init_websocket_session() -> Result<Session, BoxError> {
         read: Arc::new(Mutex::new(read)),
         write: Arc::new(Mutex::new(write)),
     })
+}
+
+const REQUIRED_TOKEN_SCOPES: [&str; 2] = ["user:read:chat", "user:write:chat"];
+
+#[derive(Debug, Deserialize)]
+struct ValidateResponse {
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+
+/// fails fast on a missing scope, which would otherwise only surface as an
+/// opaque eventsub subscription error after connecting
+async fn validate_token_scopes(
+    http_client: &reqwest::Client,
+    access_token: &str,
+) -> Result<(), BoxError> {
+    let response = http_client
+        .get("https://id.twitch.tv/oauth2/validate")
+        .header("Authorization", format!("OAuth {}", access_token))
+        .send()
+        .await?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err("Invalid OAuth token".into());
+    }
+
+    let parsed = if status.is_success() {
+        response.json::<ValidateResponse>().await.ok()
+    } else {
+        None
+    };
+    // only enforce scopes when validate gave a definitive answer
+    let Some(parsed) = parsed else {
+        log_warn!(
+            "twitch",
+            "Token validation inconclusive ({}), skipping scope check",
+            status
+        );
+        return Ok(());
+    };
+
+    let missing: Vec<&str> = REQUIRED_TOKEN_SCOPES
+        .iter()
+        .filter(|required| !parsed.scopes.iter().any(|s| s == *required))
+        .copied()
+        .collect();
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Token is missing the {} scope(s) - please regenerate your token",
+            missing.join(", ")
+        )
+        .into())
+    }
 }
 
 async fn get_user_id_from_access_token(
