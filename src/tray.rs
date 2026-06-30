@@ -154,6 +154,7 @@ mod imp {
 
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
+            .with_menu_on_left_click(false)
             .with_tooltip("osu! twitchbot")
             .with_icon(load_icon())
             .build()?;
