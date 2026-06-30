@@ -233,11 +233,12 @@ where
     })
 }
 
-const APP_TARGETS: [&str; 9] = [
+const APP_TARGETS: [&str; 10] = [
     "main",
     "gui",
     "twitch",
     "osu",
+    "memory",
     "memory-lazer",
     "memory-stable",
     "process",

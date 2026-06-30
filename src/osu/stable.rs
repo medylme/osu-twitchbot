@@ -177,7 +177,8 @@ fn scan_pattern(
 ) -> Result<usize, MemoryError> {
     log_debug!("memory-stable", "Scanning for {} pattern...", name);
     let (pattern, mask) = parse_pattern(pattern_str);
-    match process.pattern_scan(&pattern, &mask) {
+    // stable is a 32-bit process; don't scan the 64-bit wine host above 4 GiB
+    match process.pattern_scan(&pattern, &mask, Some(0x1_0000_0000)) {
         Ok(addr) => {
             log_debug!("memory-stable", "Found {} pattern at: 0x{:X}", name, addr);
             Ok(addr)

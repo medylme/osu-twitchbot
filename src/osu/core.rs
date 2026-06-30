@@ -299,7 +299,19 @@ impl ProcessMemory {
         Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
     }
 
-    pub fn pattern_scan(&self, pattern: &[u8], mask: &[bool]) -> Result<usize, MemoryError> {
+    /// scans readable memory regions for a byte pattern; regions starting at
+    /// or above `max_address` are skipped (pass `Some(0x1_0000_0000)` when the
+    /// target is a 32-bit process so a 64-bit wine host isn't scanned whole)
+    pub fn pattern_scan(
+        &self,
+        pattern: &[u8],
+        mask: &[bool],
+        max_address: Option<usize>,
+    ) -> Result<usize, MemoryError> {
+        let max_address = max_address.unwrap_or(usize::MAX);
+        let mut regions: usize = 0;
+        let mut bytes: usize = 0;
+
         #[cfg(windows)]
         {
             use windows::Win32::System::Memory::{
@@ -323,13 +335,18 @@ impl ProcessMemory {
                             || mbi.Protect == PAGE_READWRITE
                             || mbi.Protect == PAGE_EXECUTE_READ
                             || mbi.Protect == PAGE_EXECUTE_READWRITE)
+                        && (mbi.BaseAddress as usize) < max_address
                     {
-                        let region_size = mbi.RegionSize;
+                        regions += 1;
+                        bytes += mbi.RegionSize;
 
-                        if let Ok(data) = self.read_bytes(address, region_size)
-                            && let Some(offset) = find_pattern(&data, pattern, mask)
-                        {
-                            return Ok(address + offset);
+                        if let Some(found) = self.scan_region(
+                            mbi.BaseAddress as usize,
+                            mbi.RegionSize,
+                            pattern,
+                            mask,
+                        )? {
+                            return Ok(found);
                         }
                     }
 
@@ -361,27 +378,58 @@ impl ProcessMemory {
                 let start = usize::from_str_radix(addr_parts[0], 16).unwrap_or(0);
                 let end = usize::from_str_radix(addr_parts[1], 16).unwrap_or(0);
 
-                if start == 0 || end == 0 || end <= start {
+                if start == 0 || end == 0 || end <= start || start >= max_address {
                     continue;
                 }
 
-                let size = end - start;
+                regions += 1;
+                bytes += end - start;
 
-                match self.read_bytes(start, size) {
-                    Ok(data) => {
-                        if let Some(offset) = find_pattern(&data, pattern, mask) {
-                            return Ok(start + offset);
-                        }
-                    }
-                    // surface permission failures instead of a misleading
-                    // PatternNotFound so the ptrace hint fires
-                    Err(MemoryError::AccessDenied) => return Err(MemoryError::AccessDenied),
-                    Err(_) => {}
+                if let Some(found) = self.scan_region(start, end - start, pattern, mask)? {
+                    return Ok(found);
                 }
             }
         }
 
+        log_debug!(
+            "memory",
+            "Pattern not found after scanning {} regions ({} MiB)",
+            regions,
+            bytes >> 20
+        );
         Err(MemoryError::PatternNotFound)
+    }
+
+    /// reads a region in bounded chunks (overlapping by the pattern length so
+    /// boundary-straddling matches aren't missed) instead of allocating it whole
+    fn scan_region(
+        &self,
+        start: usize,
+        size: usize,
+        pattern: &[u8],
+        mask: &[bool],
+    ) -> Result<Option<usize>, MemoryError> {
+        const SCAN_CHUNK_SIZE: usize = 1 << 20;
+        let overlap = pattern.len().saturating_sub(1);
+        let mut offset = 0;
+
+        while offset < size {
+            let chunk_size = SCAN_CHUNK_SIZE.min(size - offset);
+            match self.read_bytes(start + offset, chunk_size) {
+                Ok(data) => {
+                    if let Some(found) = find_pattern(&data, pattern, mask) {
+                        return Ok(Some(start + offset + found));
+                    }
+                }
+                // surface permission failures instead of a misleading
+                // PatternNotFound so the ptrace hint fires
+                Err(MemoryError::AccessDenied) => return Err(MemoryError::AccessDenied),
+                Err(_) => {}
+            }
+            offset += chunk_size.saturating_sub(overlap).max(1);
+        }
+
+        Ok(None)
     }
 }
 
@@ -468,13 +516,14 @@ pub fn detect_osu_processes() -> Vec<DetectedProcess> {
             None
         };
 
-        if !is_lazer {
-            log_debug!(
-                "process",
-                "Detected osu! stable at exe_path: {:?}",
-                exe_path
-            );
-        }
+        // exe path is what wine/proton classification keys off, so log it
+        log_debug!(
+            "process",
+            "Detected osu! process: name={:?}, exe={:?}, classified as {:?}",
+            name,
+            exe_path,
+            client
+        );
 
         let songs_folder = if !is_lazer {
             find_songs_folder(exe_path, process)

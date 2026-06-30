@@ -325,7 +325,7 @@ impl LazerReader {
 
         let (pattern, mask) = parse_pattern(&offsets.patterns.base);
 
-        let scaling_container_target_draw_size = match process.pattern_scan(&pattern, &mask) {
+        let scaling_container_target_draw_size = match process.pattern_scan(&pattern, &mask, None) {
             Ok(addr) => {
                 log_debug!("memory-lazer", "Found pattern at: 0x{:X}", addr);
                 addr
