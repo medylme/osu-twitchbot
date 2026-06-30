@@ -21,6 +21,8 @@ A lightweight desktop app that reads beatmap information from osu! and can respo
 
 When a viewer types one of your configured commands in chat, the bot responds with the respective information.
 
+Closing the window minimizes the app to the system tray so the bot keeps running; reopen it or quit from the tray icon.
+
 ## Command-Line Arguments
 
 | Argument        | Description                            |
@@ -75,6 +77,24 @@ Settings are stored as `settings.toml`; logs are written to a `latest.log` (trun
 | Settings | `%APPDATA%\osu-twitchbot\config\settings.toml`   | `~/.config/osu-twitchbot/settings.toml` |
 | Logs     | `%LOCALAPPDATA%\osu-twitchbot\logs\`             | `~/.local/share/osu-twitchbot/logs/`   |
 
+## Linux Notes
+
+**Memory reading requires ptrace permission.** Most distros ship with `ptrace_scope=1`, which only allows reading a *child* process's memory — so reading an independently-launched osu! fails with a permission error. Pick one of:
+
+```bash
+# option 1: allow ptrace between your own processes (until reboot)
+sudo sysctl kernel.yama.ptrace_scope=0
+# make it permanent:
+echo "kernel.yama.ptrace_scope = 0" | sudo tee /etc/sysctl.d/10-ptrace.conf
+
+# option 2: grant the capability to the binary only
+sudo setcap cap_sys_ptrace+ep ./osu-twitchbot-linux-x86_64
+```
+
+**Token persistence requires a Secret Service daemon** (gnome-keyring or KWallet — present on any normal desktop). Without one, connecting still works but the token isn't remembered across restarts.
+
+**The tray icon requires AppIndicator support.** On GNOME, install the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/); KDE and most other desktops work out of the box. If no tray is available, closing the window quits the app instead.
+
 ## Building from Source
 
 ### Prerequisites
@@ -91,11 +111,13 @@ Settings are stored as `settings.toml`; logs are written to a `latest.log` (trun
 **Linux only:**
 
 ```bash
-sudo apt install libdbus-1-dev pkg-config
+sudo apt install libdbus-1-dev pkg-config libgtk-3-dev libayatana-appindicator3-dev
 # to also cross-compile the Windows binary from Linux:
 sudo apt install gcc-mingw-w64-x86-64
 rustup target add x86_64-pc-windows-gnu
 ```
+
+The GTK/appindicator packages are only needed for the system tray; build with `--no-default-features` to skip it.
 
 ### Environment Setup
 
