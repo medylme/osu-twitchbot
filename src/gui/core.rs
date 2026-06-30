@@ -37,7 +37,7 @@ pub type CommandReceiver<T> = Arc<Mutex<Option<mpsc::Receiver<T>>>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Main,
-    Settings,
+    Commands,
     Data,
     Console,
 }
@@ -47,6 +47,7 @@ pub enum Message {
     TabSelected(Tab),
     TokenInputChanged(String),
     AutoConnectToggled(bool),
+    MinimizeToTrayToggled(bool),
     TokenHelpClicked,
     ConnectClicked,
     DisconnectClicked,
@@ -78,6 +79,7 @@ pub struct State {
     token_input_value: String,
     token_saved: bool,
     auto_connect_value: bool,
+    minimize_to_tray_value: bool,
     np_command: String,
     np_format: String,
     pp_command: String,
@@ -119,8 +121,16 @@ impl State {
         };
 
         let prefs = PreferencesStore::load_or_default();
-        let (auto_connect_value, np_command, np_format, pp_command, pp_format) = (
+        let (
+            auto_connect_value,
+            minimize_to_tray_value,
+            np_command,
+            np_format,
+            pp_command,
+            pp_format,
+        ) = (
             prefs.auto_connect(),
+            prefs.minimize_to_tray(),
             prefs.np_command().to_string(),
             prefs.np_format().to_string(),
             prefs.pp_command().to_string(),
@@ -146,6 +156,7 @@ impl State {
             token_input_value,
             token_saved,
             auto_connect_value,
+            minimize_to_tray_value,
             np_command,
             np_format,
             pp_command,
@@ -175,7 +186,7 @@ impl State {
 
         let content = match self.active_tab {
             Tab::Main => self.view_main_tab(&p),
-            Tab::Settings => self.view_settings_tab(&p),
+            Tab::Commands => self.view_commands_tab(&p),
             Tab::Data => self.view_data_tab(&p),
             Tab::Console => self.view_console_tab(&p),
         };
@@ -223,7 +234,7 @@ impl State {
 
         let nav = column![
             nav_item("Main", Tab::Main),
-            nav_item("Settings", Tab::Settings),
+            nav_item("Commands", Tab::Commands),
             nav_item("Data", Tab::Data),
             nav_item("Console", Tab::Console),
         ]
@@ -351,10 +362,39 @@ impl State {
             .size(15)
             .text_size(12);
 
+        // the tray gates this: with no tray, closing always quits
+        let tray_on = tray_active();
+        let minimize_checkbox = {
+            let cb = checkbox(self.minimize_to_tray_value && tray_on)
+                .label("Minimize to tray on close")
+                .size(15)
+                .text_size(12);
+            if tray_on {
+                cb.on_toggle(Message::MinimizeToTrayToggled)
+            } else {
+                cb
+            }
+        };
+
+        let minimize_hint = text(if tray_on {
+            "When off, closing the window quits the app."
+        } else {
+            "System tray unavailable; closing the window quits the app."
+        })
+        .size(11)
+        .color(p.text_muted);
+
         column![
             self.section_title(p, "Connection"),
             column![token_label, token_row].spacing(6),
             auto_connect_checkbox,
+            container(space::horizontal())
+                .width(Fill)
+                .height(1)
+                .style(separator),
+            self.section_title(p, "Window"),
+            minimize_checkbox,
+            minimize_hint,
         ]
         .spacing(14)
         .padding([22, 24])
@@ -424,7 +464,7 @@ impl State {
         .into()
     }
 
-    fn view_settings_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
+    fn view_commands_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
         let np_section = self.command_format_section(
             p,
             "Now Playing",
@@ -455,11 +495,11 @@ impl State {
             self.build_pp_format_preview(p),
         );
 
-        let settings_content = column![np_section, pp_section]
+        let commands_content = column![np_section, pp_section]
             .spacing(24)
             .padding([22, 24]);
 
-        scrollable(container(settings_content).width(Fill))
+        scrollable(container(commands_content).width(Fill))
             .height(Fill)
             .into()
     }
@@ -714,7 +754,7 @@ impl State {
                 self.main_window = Some(id);
             }
             Message::WindowCloseRequested(id) => {
-                if tray_active() {
+                if tray_active() && self.minimize_to_tray_value {
                     log_info!("gui", "Window closed to tray");
                     self.main_window = None;
                     return window::close(id);
@@ -744,6 +784,12 @@ impl State {
                 self.auto_connect_value = value;
                 if let Err(e) = self.prefs.set_auto_connect(value) {
                     log_warn!("gui", "Failed to save auto-connect preference: {}", e);
+                }
+            }
+            Message::MinimizeToTrayToggled(value) => {
+                self.minimize_to_tray_value = value;
+                if let Err(e) = self.prefs.set_minimize_to_tray(value) {
+                    log_warn!("gui", "Failed to save minimize-to-tray preference: {}", e);
                 }
             }
             Message::TokenHelpClicked => {

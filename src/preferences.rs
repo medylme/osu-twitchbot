@@ -38,6 +38,7 @@ pub struct Config {
     pp_command: String,
     pp_format: String,
     telemetry_enabled: bool,
+    minimize_to_tray: bool,
 }
 
 impl Default for Config {
@@ -50,6 +51,7 @@ impl Default for Config {
             pp_command: DEFAULT_PP_COMMAND.to_string(),
             pp_format: DEFAULT_PP_FORMAT.to_string(),
             telemetry_enabled: true,
+            minimize_to_tray: true,
         }
     }
 }
@@ -107,6 +109,10 @@ impl PreferencesStore {
         self.config.telemetry_enabled
     }
 
+    pub fn minimize_to_tray(&self) -> bool {
+        self.config.minimize_to_tray
+    }
+
     pub fn np_command(&self) -> &str {
         &self.config.np_command
     }
@@ -125,6 +131,11 @@ impl PreferencesStore {
 
     pub fn set_auto_connect(&mut self, value: bool) -> Result<(), PreferencesError> {
         self.config.auto_connect = value;
+        self.save()
+    }
+
+    pub fn set_minimize_to_tray(&mut self, value: bool) -> Result<(), PreferencesError> {
+        self.config.minimize_to_tray = value;
         self.save()
     }
 
