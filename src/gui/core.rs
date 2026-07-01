@@ -28,8 +28,9 @@ use crate::twitch::{
     is_invalid_access_token_error,
 };
 use crate::{
-    VERSION, get_osu_channel, get_tray_status_channel, get_twitch_channel, log_debug, log_error,
-    log_info, log_warn, main_window_settings, tray_active,
+    MAX_WINDOW_SIZE, MIN_WINDOW_SIZE, VERSION, get_osu_channel, get_tray_status_channel,
+    get_twitch_channel, log_debug, log_error, log_info, log_warn, main_window_settings,
+    tray_active,
 };
 
 pub type CommandReceiver<T> = Arc<Mutex<Option<mpsc::Receiver<T>>>>;
@@ -68,6 +69,7 @@ pub enum Message {
     OpenConfigClicked,
     WindowOpened(window::Id),
     WindowCloseRequested(window::Id),
+    WindowResized(window::Id, iced::Size),
     Tray(TrayEvent),
 }
 
@@ -749,6 +751,16 @@ impl State {
         match message {
             Message::WindowOpened(id) => {
                 self.main_window = Some(id);
+            }
+            Message::WindowResized(id, size) => {
+                let clamped = iced::Size::new(
+                    size.width.clamp(MIN_WINDOW_SIZE.width, MAX_WINDOW_SIZE.width),
+                    size.height
+                        .clamp(MIN_WINDOW_SIZE.height, MAX_WINDOW_SIZE.height),
+                );
+                if clamped != size {
+                    return window::resize(id, clamped);
+                }
             }
             Message::WindowCloseRequested(id) => {
                 if tray_active() && self.minimize_to_tray_value {

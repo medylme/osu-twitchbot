@@ -41,6 +41,9 @@ pub const APP_NAME: &str = "osu-twitchbot";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
 
+pub const MIN_WINDOW_SIZE: iced::Size = iced::Size::new(620.0, 400.0);
+pub const MAX_WINDOW_SIZE: iced::Size = iced::Size::new(1000.0, 900.0);
+
 fn main() -> iced::Result {
     let telemetry_enabled = preferences::PreferencesStore::load_or_default().telemetry_enabled();
 
@@ -117,6 +120,7 @@ fn main() -> iced::Result {
                 Subscription::run(log_subscription).map(Message::LogEvent),
                 Subscription::run(tray_event_subscription).map(Message::Tray),
                 window::close_requests().map(Message::WindowCloseRequested),
+                window::resize_events().map(|(id, size)| Message::WindowResized(id, size)),
             ])
         })
         .theme(theme)
@@ -151,8 +155,8 @@ pub fn main_window_settings() -> window::Settings {
         icon,
         resizable: true,
         size: iced::Size::new(780.0, 470.0),
-        min_size: Some(iced::Size::new(620.0, 400.0)),
-        max_size: Some(iced::Size::new(1200.0, 900.0)),
+        min_size: Some(MIN_WINDOW_SIZE),
+        max_size: Some(MAX_WINDOW_SIZE),
         position: window::Position::Centered,
         exit_on_close_request: false,
         ..Default::default()
