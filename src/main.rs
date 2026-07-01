@@ -152,6 +152,7 @@ pub fn main_window_settings() -> window::Settings {
         resizable: true,
         size: iced::Size::new(780.0, 470.0),
         min_size: Some(iced::Size::new(620.0, 400.0)),
+        max_size: Some(iced::Size::new(1200.0, 900.0)),
         position: window::Position::Centered,
         exit_on_close_request: false,
         ..Default::default()
