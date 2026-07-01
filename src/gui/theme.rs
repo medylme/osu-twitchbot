@@ -33,8 +33,6 @@ pub fn get_current_theme() -> Theme {
     match override_setting {
         ThemeOverride::Light => Theme::Light,
         ThemeOverride::Dark => Theme::Dark,
-        // detection does a blocking round-trip (d-bus on linux) and this is
-        // called every redraw, so detect once and cache
         ThemeOverride::System => SYSTEM_THEME.get_or_init(detect_system_theme).clone(),
     }
 }

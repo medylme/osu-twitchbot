@@ -4931,6 +4931,9 @@ name = "rosu-mods"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3966ad347b6a8140feaa2424c947ada9b69d29f6966ef2590db34d456eb137be"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "rosu-pp"

@@ -460,8 +460,6 @@ impl TwitchClient {
         let keepalive_duration = Duration::from_secs(SOCKET_KEEPALIVE_SECONDS);
         let mut last_message = Instant::now();
 
-        // commands answer from this snapshot instead of a per-command round-trip,
-        // so concurrent viewer commands can't misroute replies
         let mut latest_beatmap: Option<BeatmapData> = None;
         let _ = osu_tx.send(OsuCommand::RequestBeatmapData).await;
 
@@ -711,8 +709,6 @@ impl TwitchClient {
             return Err(format!("Failed to send chat message: {}", error_text).into());
         }
 
-        // a 2xx can still mean the message was dropped (automod, follower-only
-        // mode, duplicate); twitch reports this via is_sent + drop_reason
         let response_body: serde_json::Value = response.json().await.unwrap_or_default();
         let sent_message = response_body.get("data").and_then(|d| d.get(0));
         if let Some(sent_message) = sent_message
@@ -815,8 +811,6 @@ struct ValidateResponse {
     scopes: Vec<String>,
 }
 
-/// fails fast on a missing scope, which would otherwise only surface as an
-/// opaque eventsub subscription error after connecting
 async fn validate_token_scopes(
     http_client: &reqwest::Client,
     access_token: &str,
@@ -837,7 +831,7 @@ async fn validate_token_scopes(
     } else {
         None
     };
-    // only enforce scopes when validate gave a definitive answer
+
     let Some(parsed) = parsed else {
         log_warn!(
             "twitch",

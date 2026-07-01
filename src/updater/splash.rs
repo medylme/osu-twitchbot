@@ -100,7 +100,6 @@ async fn perform_update(
     client: &reqwest::Client,
     release: &super::core::ReleaseInfo,
 ) -> Result<(), UpdateError> {
-    // Check if checksum is available
     let (checksum_url, checksum_name) = match (&release.checksum_url, &release.checksum_name) {
         (Some(url), Some(name)) => (url.clone(), name.clone()),
         _ => {
@@ -116,7 +115,6 @@ async fn perform_update(
     let binary_path = temp_dir.path().join(&release.binary_name);
     let checksum_path = temp_dir.path().join(&checksum_name);
 
-    // Download checksum file
     if (super::download::download_file(client, &checksum_url, &checksum_path, 0, |_| {}).await)
         .is_err()
     {

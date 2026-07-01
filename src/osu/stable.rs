@@ -71,8 +71,6 @@ pub async fn run_stable_reader(
                             *current_beatmap = Some(beatmap.clone());
                             let event = MemoryEvent::BeatmapChanged(Some(beatmap));
                             let _ = tx.send(event.clone()).await;
-                            // try_send: nothing drains the forward channel until
-                            // twitch connects, so an awaited send could stall reads
                             let _ = forward_tx.try_send(event);
                         }
                     }
@@ -177,7 +175,8 @@ fn scan_pattern(
 ) -> Result<usize, MemoryError> {
     log_debug!("memory-stable", "Scanning for {} pattern...", name);
     let (pattern, mask) = parse_pattern(pattern_str);
-    // stable is a 32-bit process; don't scan the 64-bit wine host above 4 GiB
+
+    // stable is a 32-bit process
     match process.pattern_scan(&pattern, &mask, Some(0x1_0000_0000)) {
         Ok(addr) => {
             log_debug!("memory-stable", "Found {} pattern at: 0x{:X}", name, addr);

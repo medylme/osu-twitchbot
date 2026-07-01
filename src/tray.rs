@@ -47,8 +47,7 @@ mod imp {
         quit_id: MenuId,
     }
 
-    /// runs the tray on its own tao event loop thread (which pumps gtk on
-    /// linux and win32 messages on windows); returns whether it came up
+    /// runs the tray on its own tao event loop thread
     pub fn spawn(status_rx: mpsc::Receiver<TrayStatus>, event_tx: mpsc::Sender<TrayEvent>) -> bool {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
 
@@ -65,8 +64,6 @@ mod imp {
         event_tx: mpsc::Sender<TrayEvent>,
         ready_tx: std::sync::mpsc::Sender<bool>,
     ) {
-        // event loop creation initializes gtk on linux and can panic (e.g. no
-        // display); report failure so the window falls back to close-to-quit
         let setup = catch_unwind(AssertUnwindSafe(build));
         let Ok(Ok((event_loop, tray))) = setup else {
             let _ = ready_tx.send(false);
@@ -101,8 +98,6 @@ mod imp {
 
         let _ = ready_tx.send(true);
 
-        // never exits: the process ends via the gui (iced::exit) and takes
-        // this thread with it, so ControlFlow::Exit is never needed
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             if let Event::UserEvent(user_event) = event {

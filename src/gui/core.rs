@@ -615,7 +615,6 @@ impl State {
     }
 
     fn view_console_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
-        // filter out debug logs
         let filtered_entries: Vec<&LogEntry> = self
             .log_entries
             .iter()
@@ -683,7 +682,6 @@ impl State {
         column![head, log_box].spacing(10).padding([16, 24]).into()
     }
 
-    // previews render as the chat line viewers would see
     fn chat_preview(&self, p: &ColorPalette, message_text: String) -> Element<'_, Message> {
         let who = match &self.twitch_status {
             TwitchStatus::Connected(user) => user.clone(),
@@ -736,7 +734,6 @@ impl State {
         task
     }
 
-    // mirrors status changes into the tray menu, skipping no-op updates
     fn sync_tray(&mut self) {
         let status = (self.osu_status.to_string(), self.twitch_status.to_string());
         if status != self.last_tray_status {
@@ -1029,7 +1026,6 @@ impl State {
             },
             Message::LogEvent(entry) => {
                 self.log_entries.push_back(entry);
-                // clamp amount of log entries
                 if self.log_entries.len() > MAX_LOG_ENTRIES {
                     self.log_entries.pop_front();
                 }

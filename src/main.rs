@@ -64,8 +64,6 @@ fn main() -> iced::Result {
             ))
         });
 
-    // sentry's panic integration captures the event; chain a flush so it is
-    // sent before the process unwinds away (the held guard also flushes on drop)
     if _guard.is_some() {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
@@ -81,7 +79,6 @@ fn main() -> iced::Result {
 
     #[cfg(not(debug_assertions))]
     {
-        // runs even with --no-update so a stale .old backup never lingers
         updater::install::cleanup_old_binary();
         if is_auto_update_enabled() {
             let _ = updater::splash::run_startup_update_check();
@@ -90,8 +87,6 @@ fn main() -> iced::Result {
 
     log_info!("main", "Starting osu-twitchbot");
 
-    // background workers run on their own runtime; they talk to the GUI purely
-    // over tokio channels, so the osu/twitch/logging modules never touch iced
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -128,7 +123,6 @@ fn main() -> iced::Result {
         .title(title)
         .run();
 
-    // tear down the workers once the daemon exits
     drop(runtime);
     result
 }
@@ -159,8 +153,6 @@ pub fn main_window_settings() -> window::Settings {
         size: iced::Size::new(780.0, 470.0),
         min_size: Some(iced::Size::new(620.0, 400.0)),
         position: window::Position::Centered,
-        // close requests are handled in update: close to tray, or quit
-        // when no tray is available
         exit_on_close_request: false,
         ..Default::default()
     }
@@ -172,8 +164,6 @@ pub fn tray_active() -> bool {
     TRAY_ACTIVE.load(Ordering::Relaxed)
 }
 
-/// a sender plus a one-time-takeable receiver, shared between the GUI / a
-/// subscription bridge and a background worker
 type Channel<T> = (mpsc::Sender<T>, Arc<Mutex<Option<mpsc::Receiver<T>>>>);
 
 fn new_channel<T>(buffer: usize) -> Channel<T> {
@@ -181,15 +171,14 @@ fn new_channel<T>(buffer: usize) -> Channel<T> {
     (tx, Arc::new(Mutex::new(Some(rx))))
 }
 
-// GUI -> worker (commands)
 static OSU_CHANNEL: OnceLock<Channel<OsuCommand>> = OnceLock::new();
 static TWITCH_CHANNEL: OnceLock<Channel<TwitchCommand>> = OnceLock::new();
-// worker -> GUI (events, drained by the bridge subscriptions)
+
 static OSU_EVENT: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
 static TWITCH_EVENT: OnceLock<Channel<TwitchEvent>> = OnceLock::new();
-// osu worker -> twitch worker (beatmap responses)
+
 static OSU_EVENT_FORWARD: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
-// tray thread <-> GUI
+
 static TRAY_EVENT: OnceLock<Channel<TrayEvent>> = OnceLock::new();
 static TRAY_STATUS: OnceLock<Channel<TrayStatus>> = OnceLock::new();
 
@@ -221,7 +210,6 @@ pub fn get_tray_status_channel() -> &'static Channel<TrayStatus> {
     TRAY_STATUS.get_or_init(|| new_channel(10))
 }
 
-/// bridge a worker's tokio event receiver into an iced subscription
 fn bridge<T: Send + 'static>(
     channel: &'static Channel<T>,
     buffer: usize,
@@ -330,7 +318,6 @@ async fn osu_worker() {
         current_beatmap = None;
         let event = MemoryEvent::BeatmapChanged(None);
         let _ = tx.send(event.clone()).await;
-        // try_send: nothing drains the forward channel until twitch connects
         let _ = forward_tx.try_send(event);
 
         let _ = tx
@@ -361,7 +348,6 @@ async fn twitch_worker() {
                 pp_command,
                 pp_format,
             } => {
-                // clean up any existing connections
                 if let Some(handle) = websocket_handle.take() {
                     handle.abort();
                 }
@@ -379,7 +365,6 @@ async fn twitch_worker() {
 
                         match subscribe_result {
                             Ok(()) => {
-                                // create a new channel and update the osu worker with it
                                 let (new_forward_tx, osu_event_rx) =
                                     mpsc::channel::<MemoryEvent>(10);
 

@@ -8,7 +8,7 @@ pub fn get_current_exe() -> Result<PathBuf, UpdateError> {
 
 pub fn cleanup_old_binary() {
     if let Ok(current_exe) = get_current_exe() {
-        // a leftover .new means an update was interrupted mid-staging
+        // a leftover .new means an update was interrupted
         try_remove_file(&current_exe.with_extension("new"));
         try_remove_file(&current_exe.with_extension("old"));
 
@@ -54,8 +54,6 @@ fn install_windows(current_exe: &Path, new_binary: &Path) -> Result<(), UpdateEr
     let staged_path = current_exe.with_extension("exe.new");
     let backup_path = current_exe.with_extension("exe.old");
 
-    // stage next to the exe so the swap below is two same-filesystem renames;
-    // a failed copy aborts here with the current binary untouched
     std::fs::copy(new_binary, &staged_path)?;
 
     if backup_path.exists() {
@@ -77,8 +75,6 @@ fn install_linux(current_exe: &Path, new_binary: &Path) -> Result<(), UpdateErro
     let staged_path = current_exe.with_extension("new");
     let backup_path = current_exe.with_extension("old");
 
-    // stage next to the exe so the swap below is two same-filesystem renames;
-    // a failed copy aborts here with the current binary untouched
     std::fs::copy(new_binary, &staged_path)?;
     let mut perms = std::fs::metadata(&staged_path)?.permissions();
     perms.set_mode(0o755);

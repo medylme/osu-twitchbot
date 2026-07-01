@@ -1,7 +1,9 @@
 use std::path::Path;
 
-use rosu_mods::{Acronym, GameModIntermode, GameMode, GameModsIntermode};
+use rosu_mods::serde::GameModSeed;
+use rosu_mods::{Acronym, GameMod, GameModIntermode, GameMode, GameMods};
 use rosu_pp::{Beatmap, Difficulty, Performance};
+use serde::de::DeserializeSeed;
 use thiserror::Error;
 
 use super::core::GameplayMods;
@@ -43,11 +45,11 @@ fn load_beatmap(local_path: Option<&str>, songs_folder: Option<&str>) -> Result<
     Ok(std::fs::read(&full_path)?)
 }
 
-fn build_mods(mods: &Option<GameplayMods>) -> GameModsIntermode {
-    let mut intermode = GameModsIntermode::new();
+fn build_mods(mods: &Option<GameplayMods>, mode: GameMode) -> GameMods {
+    let mut game_mods = GameMods::default();
 
     let Some(gameplay_mods) = mods else {
-        return intermode;
+        return game_mods;
     };
 
     for mod_info in &gameplay_mods.mods {
@@ -60,8 +62,10 @@ fn build_mods(mods: &Option<GameplayMods>) -> GameModsIntermode {
             continue;
         };
 
-        let gamemod = GameModIntermode::from_acronym(acronym);
-        if matches!(gamemod, GameModIntermode::Unknown(_)) {
+        if matches!(
+            GameModIntermode::from_acronym(acronym),
+            GameModIntermode::Unknown(_)
+        ) {
             log_warn!(
                 "osu",
                 "Ignoring unknown mod in pp calculation: {}",
@@ -70,14 +74,34 @@ fn build_mods(mods: &Option<GameplayMods>) -> GameModsIntermode {
             continue;
         }
 
-        intermode.insert(gamemod);
+        let gamemod = mod_info
+            .settings
+            .as_ref()
+            .and_then(|settings| {
+                let value = serde_json::json!({
+                    "acronym": mod_info.acronym,
+                    "settings": settings,
+                });
+                GameModSeed::Mode(mode)
+                    .deserialize(value)
+                    .inspect_err(|e| {
+                        log_warn!(
+                            "osu",
+                            "Ignoring settings of mod {} in pp calculation: {}",
+                            mod_info.acronym,
+                            e
+                        );
+                    })
+                    .ok()
+            })
+            .unwrap_or_else(|| GameMod::new(&mod_info.acronym, mode));
+
+        game_mods.insert(gamemod);
     }
 
-    intermode
+    game_mods
 }
 
-// the intermode set only carries legacy clock rates, so convert to
-// mode-specific mods where lazer rate mods like DC are honored
 fn game_mode(beatmap: &Beatmap) -> GameMode {
     match beatmap.mode as u8 {
         1 => GameMode::Taiko,
@@ -95,7 +119,7 @@ pub fn get_pp_spread(
     let osu_file = load_beatmap(local_path, songs_folder)?;
     let beatmap = Beatmap::from_bytes(&osu_file).map_err(|e| PpError::Parse(e.to_string()))?;
 
-    let game_mods = build_mods(mods).with_mode(game_mode(&beatmap));
+    let game_mods = build_mods(mods, game_mode(&beatmap));
     let difficulty = Difficulty::new().mods(game_mods);
 
     let pp_at = |accuracy: f64| {
@@ -147,24 +171,30 @@ SliderTickRate:1
 448,192,1750,1,0,0:0:0:0
 ";
 
-    fn pp_with(acronyms: &[&str]) -> f64 {
+    fn pp_with_mods(mods: Vec<ModInfo>) -> f64 {
         let beatmap = Beatmap::from_bytes(TEST_MAP.as_bytes()).unwrap();
         let mods = Some(GameplayMods {
-            mods: acronyms
+            mods,
+            mods_string: String::new(),
+        });
+
+        Performance::new(&beatmap)
+            .difficulty(Difficulty::new().mods(build_mods(&mods, game_mode(&beatmap))))
+            .accuracy(100.0)
+            .calculate()
+            .pp()
+    }
+
+    fn pp_with(acronyms: &[&str]) -> f64 {
+        pp_with_mods(
+            acronyms
                 .iter()
                 .map(|a| ModInfo {
                     acronym: (*a).to_string(),
                     settings: None,
                 })
                 .collect(),
-            mods_string: String::new(),
-        });
-
-        Performance::new(&beatmap)
-            .difficulty(Difficulty::new().mods(build_mods(&mods).with_mode(game_mode(&beatmap))))
-            .accuracy(100.0)
-            .calculate()
-            .pp()
+        )
     }
 
     #[test]
@@ -174,12 +204,32 @@ SliderTickRate:1
 
     #[test]
     fn daycore_lowers_pp() {
-        // lazer-only mod; the old legacy bitmask silently dropped it
         assert!(pp_with(&["DC"]) < pp_with(&[]));
     }
 
     #[test]
     fn unknown_mods_are_ignored() {
         assert_eq!(pp_with(&["ZZ"]), pp_with(&[]));
+    }
+
+    #[test]
+    fn custom_speed_multiplier_is_honored() {
+        let dt_1_25 = pp_with_mods(vec![ModInfo {
+            acronym: "DT".to_string(),
+            settings: Some(serde_json::json!({ "speed_change": 1.25 })),
+        }]);
+
+        assert!(dt_1_25 > pp_with(&[]));
+        assert!(dt_1_25 < pp_with(&["DT"]));
+    }
+
+    #[test]
+    fn invalid_settings_fall_back_to_defaults() {
+        let dt_bad = pp_with_mods(vec![ModInfo {
+            acronym: "DT".to_string(),
+            settings: Some(serde_json::json!({ "speed_change": "fast" })),
+        }]);
+
+        assert_eq!(dt_bad, pp_with(&["DT"]));
     }
 }

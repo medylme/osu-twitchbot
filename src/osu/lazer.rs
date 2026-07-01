@@ -8,7 +8,7 @@ use tokio::time::{self, Duration};
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods,
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuCommand, OsuStatus,
-    ProcessMemory, order_mods, parse_pattern, privilege_hint,
+    ProcessMemory, order_mods, parse_pattern, privilege_hint, rate_mod_default,
 };
 use crate::{log_debug, log_error, log_info, log_warn};
 
@@ -124,8 +124,6 @@ pub async fn run_lazer_reader(
                             *current_beatmap = Some(beatmap.clone());
                             let event = MemoryEvent::BeatmapChanged(Some(beatmap));
                             let _ = tx.send(event.clone()).await;
-                            // try_send: nothing drains the forward channel until
-                            // twitch connects, so an awaited send could stall reads
                             let _ = forward_tx.try_send(event);
                         }
                     }
@@ -608,7 +606,6 @@ impl LazerReader {
             return None;
         }
 
-        // bindable.value is the list of selected mods
         let list = self.process.read_ptr(bindable + 0x20).ok()?;
         if list == 0 {
             return None;
@@ -626,7 +623,7 @@ impl LazerReader {
             if let Some(acronym) = self.mod_vtable_map.get(&vtable) {
                 mods.push(ModInfo {
                     acronym: acronym.clone(),
-                    settings: None,
+                    settings: self.read_rate_mod_settings(acronym, mod_ptr),
                 });
             } else {
                 log_debug!(
@@ -640,6 +637,28 @@ impl LazerReader {
 
         let mods_string = order_mods(&mut mods);
         Some(GameplayMods { mods, mods_string })
+    }
+
+    fn read_rate_mod_settings(&self, acronym: &str, mod_ptr: usize) -> Option<serde_json::Value> {
+        rate_mod_default(acronym)?;
+
+        let speed_change_bindable = self.process.read_ptr(mod_ptr + 0x10).ok()?;
+        if speed_change_bindable == 0 {
+            return None;
+        }
+
+        let rate = self.process.read_f64(speed_change_bindable + 0x40).ok()?;
+        if !(0.1..=5.0).contains(&rate) {
+            log_debug!(
+                "memory-lazer",
+                "Ignoring implausible {} speed multiplier: {}",
+                acronym,
+                rate
+            );
+            return None;
+        }
+
+        Some(serde_json::json!({ "speed_change": rate }))
     }
 
     pub fn read_beatmap(&mut self) -> Result<BeatmapData, MemoryError> {
@@ -832,7 +851,6 @@ impl LazerReader {
             return None;
         }
 
-        // unwrap WrappedStorage or return directly
         let underlying = if self.offsets.wrapped_storage.underlying_storage != 0 {
             self.process
                 .read_ptr(storage + self.offsets.wrapped_storage.underlying_storage)

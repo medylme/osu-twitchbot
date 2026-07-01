@@ -8,8 +8,6 @@ use tokio::sync::mpsc;
 use crate::log_debug;
 
 pub const DATA_POLLING_INTERVAL_MS: u64 = 100;
-// brief read failures happen during screen transitions; only tear the reader
-// down once they persist (e.g. the process actually exited)
 pub const MAX_CONSECUTIVE_READ_FAILURES: u32 = 10;
 
 #[derive(Debug)]
@@ -238,7 +236,6 @@ mod platform {
 
             if result < 0 {
                 let err = std::io::Error::last_os_error();
-                // ptrace_scope denies at read time on some kernels
                 if matches!(err.raw_os_error(), Some(libc::EPERM | libc::EACCES)) {
                     return Err(MemoryError::AccessDenied);
                 }
@@ -299,9 +296,11 @@ impl ProcessMemory {
         Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
     }
 
-    /// scans readable memory regions for a byte pattern; regions starting at
-    /// or above `max_address` are skipped (pass `Some(0x1_0000_0000)` when the
-    /// target is a 32-bit process so a 64-bit wine host isn't scanned whole)
+    pub fn read_f64(&self, addr: usize) -> Result<f64, MemoryError> {
+        let bytes = self.read_bytes(addr, 8)?;
+        Ok(f64::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
     pub fn pattern_scan(
         &self,
         pattern: &[u8],
@@ -400,8 +399,6 @@ impl ProcessMemory {
         Err(MemoryError::PatternNotFound)
     }
 
-    /// reads a region in bounded chunks (overlapping by the pattern length so
-    /// boundary-straddling matches aren't missed) instead of allocating it whole
     fn scan_region(
         &self,
         start: usize,
@@ -421,8 +418,6 @@ impl ProcessMemory {
                         return Ok(Some(start + offset + found));
                     }
                 }
-                // surface permission failures instead of a misleading
-                // PatternNotFound so the ptrace hint fires
                 Err(MemoryError::AccessDenied) => return Err(MemoryError::AccessDenied),
                 Err(_) => {}
             }
@@ -458,12 +453,10 @@ pub fn detect_lazer_version(exe_path: &Path) -> Option<String> {
     let version_file = exe_path.parent()?.join("sq.version");
     let content = std::fs::read_to_string(&version_file).ok()?;
 
-    // parse XML
     let version_start = content.find("<version>")? + "<version>".len();
     let version_end = content[version_start..].find("</version>")?;
     let version_str = &content[version_start..version_start + version_end];
 
-    // remove "-lazer" suffix
     let version = version_str
         .strip_suffix("-lazer")
         .unwrap_or(version_str)
@@ -516,7 +509,6 @@ pub fn detect_osu_processes() -> Vec<DetectedProcess> {
             None
         };
 
-        // exe path is what wine/proton classification keys off, so log it
         log_debug!(
             "process",
             "Detected osu! process: name={:?}, exe={:?}, classified as {:?}",
@@ -672,10 +664,34 @@ pub fn order_mods(mods: &mut [ModInfo]) -> String {
         return "NoMod".to_string();
     }
 
-    mods.iter()
-        .map(|m| m.acronym.as_str())
-        .collect::<Vec<_>>()
-        .join("")
+    mods.iter().map(mod_display).collect::<Vec<_>>().join("")
+}
+
+pub fn rate_mod_default(acronym: &str) -> Option<f64> {
+    match acronym {
+        "DT" | "NC" => Some(1.5),
+        "HT" | "DC" => Some(0.75),
+        _ => None,
+    }
+}
+
+fn mod_display(m: &ModInfo) -> String {
+    let Some(default_rate) = rate_mod_default(&m.acronym) else {
+        return m.acronym.clone();
+    };
+
+    let custom_rate = m
+        .settings
+        .as_ref()
+        .and_then(|s| s.get("speed_change"))
+        .and_then(|v| v.as_f64());
+
+    match custom_rate {
+        Some(rate) if (rate - default_rate).abs() > 0.001 => {
+            format!("{}({}x)", m.acronym, rate)
+        }
+        _ => m.acronym.clone(),
+    }
 }
 
 pub fn parse_pattern(pattern_str: &str) -> (Vec<u8>, Vec<bool>) {
@@ -694,4 +710,54 @@ pub fn parse_pattern(pattern_str: &str) -> (Vec<u8>, Vec<bool>) {
     }
 
     (pattern, mask)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mod_info(acronym: &str, settings: Option<serde_json::Value>) -> ModInfo {
+        ModInfo {
+            acronym: acronym.to_string(),
+            settings,
+        }
+    }
+
+    #[test]
+    fn order_mods_sorts_and_concatenates() {
+        let mut mods = vec![mod_info("DT", None), mod_info("HD", None)];
+        assert_eq!(order_mods(&mut mods), "HDDT");
+    }
+
+    #[test]
+    fn order_mods_empty_is_nomod() {
+        assert_eq!(order_mods(&mut []), "NoMod");
+    }
+
+    #[test]
+    fn custom_rate_is_shown() {
+        let mut mods = vec![mod_info(
+            "DT",
+            Some(serde_json::json!({ "speed_change": 1.25 })),
+        )];
+        assert_eq!(order_mods(&mut mods), "DT(1.25x)");
+    }
+
+    #[test]
+    fn default_rate_is_not_shown() {
+        let mut mods = vec![mod_info(
+            "DT",
+            Some(serde_json::json!({ "speed_change": 1.5 })),
+        )];
+        assert_eq!(order_mods(&mut mods), "DT");
+    }
+
+    #[test]
+    fn non_rate_settings_are_not_shown() {
+        let mut mods = vec![mod_info(
+            "DA",
+            Some(serde_json::json!({ "approach_rate": 10.0 })),
+        )];
+        assert_eq!(order_mods(&mut mods), "DA");
+    }
 }
