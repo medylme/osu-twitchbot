@@ -754,7 +754,8 @@ impl State {
             }
             Message::WindowResized(id, size) => {
                 let clamped = iced::Size::new(
-                    size.width.clamp(MIN_WINDOW_SIZE.width, MAX_WINDOW_SIZE.width),
+                    size.width
+                        .clamp(MIN_WINDOW_SIZE.width, MAX_WINDOW_SIZE.width),
                     size.height
                         .clamp(MIN_WINDOW_SIZE.height, MAX_WINDOW_SIZE.height),
                 );
