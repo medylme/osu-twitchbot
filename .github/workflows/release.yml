@@ -29,9 +29,17 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Clippy
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          GITHUB_LATEST_RELEASE_URL: https://api.github.com/repos/${{ github.repository }}/releases/latest
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          GITHUB_LATEST_RELEASE_URL: https://api.github.com/repos/${{ github.repository }}/releases/latest
         run: cargo test
 
   build-linux:
