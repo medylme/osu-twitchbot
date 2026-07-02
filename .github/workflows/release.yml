@@ -141,6 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -176,3 +177,15 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+
+      - name: Trigger release notify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME=$(gh release view "${GITHUB_REF_NAME}" --json name -q .name)
+          BODY=$(gh release view "${GITHUB_REF_NAME}" --json body -q .body)
+          URL=$(gh release view "${GITHUB_REF_NAME}" --json url -q .url)
+          gh workflow run release-notify.yml \
+            -f release_name="$NAME" \
+            -f release_body="$BODY" \
+            -f release_html_url="$URL"
