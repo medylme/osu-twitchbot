@@ -40,11 +40,40 @@ use updater::core::set_auto_update_enabled;
 pub const APP_NAME: &str = "osu-twitchbot";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROCESS_SCAN_INTERVAL_MS: u64 = 2000;
+const SINGLE_INSTANCE_PORT: u16 = 47727;
 
 pub const MIN_WINDOW_SIZE: iced::Size = iced::Size::new(620.0, 400.0);
 pub const MAX_WINDOW_SIZE: iced::Size = iced::Size::new(1000.0, 900.0);
 
+fn ensure_single_instance() -> bool {
+    use std::io::{ErrorKind, Write};
+    use std::net::{TcpListener, TcpStream};
+
+    match TcpListener::bind(("127.0.0.1", SINGLE_INSTANCE_PORT)) {
+        Ok(listener) => {
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    drop(stream);
+                    let _ = get_tray_event().0.clone().try_send(TrayEvent::OpenWindow);
+                }
+            });
+            true
+        }
+        Err(e) if e.kind() == ErrorKind::AddrInUse => {
+            if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", SINGLE_INSTANCE_PORT)) {
+                let _ = stream.write_all(b"activate");
+            }
+            false
+        }
+        Err(_) => true,
+    }
+}
+
 fn main() -> iced::Result {
+    if !ensure_single_instance() {
+        return Ok(());
+    }
+
     let telemetry_enabled = preferences::PreferencesStore::load_or_default().telemetry_enabled();
 
     let _log_guards = logging::init(telemetry_enabled);
