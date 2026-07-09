@@ -307,9 +307,32 @@ impl ProcessMemory {
         mask: &[bool],
         max_address: Option<usize>,
     ) -> Result<usize, MemoryError> {
+        self.pattern_scan_first_valid(pattern, mask, max_address, 1, |_| true)
+    }
+
+    pub fn pattern_scan_first_valid(
+        &self,
+        pattern: &[u8],
+        mask: &[bool],
+        max_address: Option<usize>,
+        max_candidates: usize,
+        mut validate: impl FnMut(usize) -> bool,
+    ) -> Result<usize, MemoryError> {
         let max_address = max_address.unwrap_or(usize::MAX);
         let mut regions: usize = 0;
         let mut bytes: usize = 0;
+        let mut tried: usize = 0;
+        let mut found: Option<usize> = None;
+
+        let mut on_match = |addr: usize| -> bool {
+            tried += 1;
+            if validate(addr) {
+                found = Some(addr);
+                true
+            } else {
+                tried >= max_candidates
+            }
+        };
 
         #[cfg(windows)]
         {
@@ -339,13 +362,16 @@ impl ProcessMemory {
                         regions += 1;
                         bytes += mbi.RegionSize;
 
-                        if let Some(found) = self.scan_region(
+                        let stop = self.scan_region(
                             mbi.BaseAddress as usize,
                             mbi.RegionSize,
                             pattern,
                             mask,
-                        )? {
-                            return Ok(found);
+                            &mut on_match,
+                        )?;
+
+                        if stop {
+                            break;
                         }
                     }
 
@@ -384,19 +410,23 @@ impl ProcessMemory {
                 regions += 1;
                 bytes += end - start;
 
-                if let Some(found) = self.scan_region(start, end - start, pattern, mask)? {
-                    return Ok(found);
+                let stop = self.scan_region(start, end - start, pattern, mask, &mut on_match)?;
+
+                if stop {
+                    break;
                 }
             }
         }
 
         log_debug!(
             "memory",
-            "Pattern not found after scanning {} regions ({} MiB)",
+            "Pattern scan tried {} candidate(s) after scanning {} regions ({} MiB)",
+            tried,
             regions,
             bytes >> 20
         );
-        Err(MemoryError::PatternNotFound)
+
+        found.ok_or(MemoryError::PatternNotFound)
     }
 
     fn scan_region(
@@ -405,7 +435,8 @@ impl ProcessMemory {
         size: usize,
         pattern: &[u8],
         mask: &[bool],
-    ) -> Result<Option<usize>, MemoryError> {
+        on_match: &mut impl FnMut(usize) -> bool,
+    ) -> Result<bool, MemoryError> {
         const SCAN_CHUNK_SIZE: usize = 1 << 20;
         let overlap = pattern.len().saturating_sub(1);
         let mut offset = 0;
@@ -414,8 +445,16 @@ impl ProcessMemory {
             let chunk_size = SCAN_CHUNK_SIZE.min(size - offset);
             match self.read_bytes(start + offset, chunk_size) {
                 Ok(data) => {
-                    if let Some(found) = find_pattern(&data, pattern, mask) {
-                        return Ok(Some(start + offset + found));
+                    let mut search_from = 0;
+                    while let Some(found) = find_pattern(&data[search_from..], pattern, mask) {
+                        let addr = start + offset + search_from + found;
+                        if on_match(addr) {
+                            return Ok(true);
+                        }
+                        search_from += found + 1;
+                        if search_from >= data.len() {
+                            break;
+                        }
                     }
                 }
                 Err(MemoryError::AccessDenied) => return Err(MemoryError::AccessDenied),
@@ -424,7 +463,7 @@ impl ProcessMemory {
             offset += chunk_size.saturating_sub(overlap).max(1);
         }
 
-        Ok(None)
+        Ok(false)
     }
 }
 

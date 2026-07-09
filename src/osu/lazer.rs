@@ -323,92 +323,81 @@ impl LazerReader {
 
         let (pattern, mask) = parse_pattern(&offsets.patterns.base);
 
-        let scaling_container_target_draw_size = match process.pattern_scan(&pattern, &mask, None) {
-            Ok(addr) => {
-                log_debug!("memory-lazer", "Found pattern at: 0x{:X}", addr);
-                addr
-            }
-            Err(e) => {
-                log_error!("memory-lazer", "Failed to find pattern: {}", e);
-                if matches!(e, MemoryError::AccessDenied) {
-                    log_warn!("memory-lazer", "{}", privilege_hint());
+        const MAX_BASE_CANDIDATES: usize = 16;
+
+        let mut resolved_game_base: Option<usize> = None;
+        let mut last_err: Option<String> = None;
+
+        let validate = |scaling_container_target_draw_size: usize| -> bool {
+            let external_link_opener_addr = (scaling_container_target_draw_size as isize
+                + offsets.base.external_link_opener)
+                as usize;
+
+            let external_link_opener = match process.read_ptr(external_link_opener_addr) {
+                Ok(ptr) if ptr != 0 => ptr,
+                Ok(_) => {
+                    last_err = Some("ExternalLinkOpener pointer is null".to_string());
+                    return false;
                 }
-                return Err(Box::new(e));
+                Err(e) => {
+                    last_err = Some(format!("Failed to read ExternalLinkOpener: {}", e));
+                    return false;
+                }
+            };
+
+            let api_ptr_addr = external_link_opener + offsets.external_link_opener.api;
+            let api = match process.read_ptr(api_ptr_addr) {
+                Ok(ptr) if ptr != 0 => ptr,
+                Ok(_) => {
+                    last_err = Some("API pointer is null".to_string());
+                    return false;
+                }
+                Err(e) => {
+                    last_err = Some(format!("Failed to read API: {}", e));
+                    return false;
+                }
+            };
+
+            let game_base_addr = api + offsets.api_access.game;
+            let ptr = match process.read_ptr(game_base_addr) {
+                Ok(ptr) if ptr != 0 => ptr,
+                Ok(_) => {
+                    last_err = Some("Game base pointer is null".to_string());
+                    return false;
+                }
+                Err(e) => {
+                    last_err = Some(format!("Failed to read game base: {}", e));
+                    return false;
+                }
+            };
+
+            if process.read_ptr(ptr).is_err() {
+                last_err = Some("Cannot read vtable at game base, address is invalid".to_string());
+                return false;
             }
+
+            resolved_game_base = Some(ptr);
+            true
         };
 
-        let external_link_opener_addr = (scaling_container_target_draw_size as isize
-            + offsets.base.external_link_opener) as usize;
-        log_debug!(
-            "memory-lazer",
-            "ExternalLinkOpener address: 0x{:X}",
-            external_link_opener_addr
-        );
-        let external_link_opener = match process.read_ptr(external_link_opener_addr) {
-            Ok(ptr) => {
-                if ptr == 0 {
-                    log_error!("memory-lazer", "ExternalLinkOpener pointer is null");
-                    return Err("ExternalLinkOpener pointer is null".into());
-                }
-                log_debug!("memory-lazer", "ExternalLinkOpener value: 0x{:X}", ptr);
-                ptr
+        if let Err(e) =
+            process.pattern_scan_first_valid(&pattern, &mask, None, MAX_BASE_CANDIDATES, validate)
+        {
+            if matches!(e, MemoryError::AccessDenied) {
+                log_warn!("memory-lazer", "{}", privilege_hint());
             }
-            Err(e) => {
-                log_error!("memory-lazer", "Failed to read ExternalLinkOpener: {}", e);
-                log_error!(
-                    "memory-lazer",
-                    "This might mean the pattern offset is incorrect."
-                );
-                return Err(Box::new(e));
-            }
-        };
+            let err = match last_err {
+                Some(last) => format!(
+                    "Exhausted {} pattern candidate(s) without finding a valid game base; last error: {}",
+                    MAX_BASE_CANDIDATES, last
+                ),
+                None => format!("Failed to find pattern: {}", e),
+            };
+            log_error!("memory-lazer", "{}", err);
+            return Err(err.into());
+        }
 
-        let api_ptr_addr = external_link_opener + offsets.external_link_opener.api;
-        log_debug!("memory-lazer", "API pointer address: 0x{:X}", api_ptr_addr);
-        let api = match process.read_ptr(api_ptr_addr) {
-            Ok(ptr) => {
-                if ptr == 0 {
-                    log_error!("memory-lazer", "API pointer is null");
-                    return Err("API pointer is null".into());
-                }
-                log_debug!("memory-lazer", "API value: 0x{:X}", ptr);
-                ptr
-            }
-            Err(e) => {
-                log_error!("memory-lazer", "Failed to read API: {}", e);
-                return Err(Box::new(e));
-            }
-        };
-
-        let game_base_addr = api + offsets.api_access.game;
-        log_debug!(
-            "memory-lazer",
-            "Game base address location: 0x{:X}",
-            game_base_addr
-        );
-        let game_base = match process.read_ptr(game_base_addr) {
-            Ok(ptr) => {
-                if ptr == 0 {
-                    log_error!("memory-lazer", "Game base pointer is null");
-                    return Err("Game base pointer is null".into());
-                }
-                log_debug!("memory-lazer", "Game base value: 0x{:X}", ptr);
-
-                if process.read_ptr(ptr).is_err() {
-                    log_warn!(
-                        "memory-lazer",
-                        "Cannot read vtable at game base, address might be invalid"
-                    );
-                }
-
-                ptr
-            }
-            Err(e) => {
-                log_error!("memory-lazer", "Failed to read game base: {}", e);
-                return Err(Box::new(e));
-            }
-        };
-
+        let game_base = resolved_game_base.expect("validate() sets resolved_game_base on success");
         log_debug!("memory-lazer", "Found game base at: 0x{:X}", game_base);
 
         let process = Arc::new(process);
