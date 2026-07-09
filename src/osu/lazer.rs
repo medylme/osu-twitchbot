@@ -822,7 +822,7 @@ impl LazerReader {
 
         match (hash, base_path) {
             (Some(h), Some(base)) if h.len() >= 2 => {
-                let file_path = format!("{}/{}/{}", &h[0..1], &h[0..2], &h);
+                let file_path = format!("{}/{}/{}", &h[0..1], &h[0..2], h);
                 let files_folder = format!("{}/files", base);
                 (Some(file_path), Some(files_folder))
             }
