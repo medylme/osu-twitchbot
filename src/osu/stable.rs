@@ -9,7 +9,7 @@ use super::core::{
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuCommand, OsuStatus,
     ProcessMemory, order_mods, parse_pattern, privilege_hint,
 };
-use crate::{log_debug, log_error, log_warn};
+use crate::{log_debug, log_warn};
 
 pub async fn run_stable_reader(
     pid: u32,
@@ -183,7 +183,7 @@ fn scan_pattern(
             Ok(addr)
         }
         Err(e) => {
-            log_error!("memory-stable", "Failed to find {} pattern: {}", name, e);
+            log_warn!("memory-stable", "Failed to find {} pattern: {}", name, e);
             if matches!(e, MemoryError::AccessDenied) {
                 log_warn!("memory-stable", "{}", privilege_hint());
             }
@@ -207,7 +207,7 @@ impl StableReader {
         offsets_json: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let offsets: Offsets = serde_json::from_str(offsets_json).map_err(|e| {
-            log_error!("memory-stable", "Failed to parse offsets JSON: {}", e);
+            log_warn!("memory-stable", "Failed to parse offsets JSON: {}", e);
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 

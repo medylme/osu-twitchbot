@@ -25,7 +25,7 @@ use crate::tray::{TrayEvent, TrayStatus};
 use crate::twitch::{
     DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT,
     INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
-    is_invalid_access_token_error,
+    is_invalid_access_token_error, is_transient_network_error,
 };
 use crate::{
     MAX_WINDOW_SIZE, MIN_WINDOW_SIZE, VERSION, get_osu_channel, get_tray_status_channel,
@@ -1024,7 +1024,7 @@ impl State {
                     self.twitch_status = TwitchStatus::Disconnected;
                 }
                 TwitchEvent::Error(ref e) => {
-                    if is_invalid_access_token_error(e) {
+                    if is_invalid_access_token_error(e) || is_transient_network_error(e) {
                         log_warn!("twitch", "Connection error: {}", e);
                     } else {
                         log_error!("twitch", "Connection error: {}", e);

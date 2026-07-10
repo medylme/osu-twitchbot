@@ -52,6 +52,15 @@ pub fn is_invalid_access_token_error(message: &str) -> bool {
     message.contains("Invalid OAuth token")
 }
 
+pub fn is_transient_network_error(message: &str) -> bool {
+    message.contains("Keepalive timeout")
+        || message.contains("Server requested reconnect")
+        || message.contains("os error 10053")
+        || message.contains("os error 10054")
+        || message.contains("os error 10060")
+        || message.contains("ConnectionReset")
+}
+
 #[derive(Debug, Clone)]
 pub enum TwitchCommand {
     Connect {
@@ -641,7 +650,11 @@ impl TwitchClient {
                                 .send_chat_message(&self.user.id, &reply, Some(&event.message_id))
                                 .await
                             {
-                                log_error!("twitch", "Failed to send chat message: {}", e);
+                                if is_transient_network_error(&e.to_string()) {
+                                    log_warn!("twitch", "Failed to send chat message: {}", e);
+                                } else {
+                                    log_error!("twitch", "Failed to send chat message: {}", e);
+                                }
                             }
                             *last_command_time = Some(now);
                         }

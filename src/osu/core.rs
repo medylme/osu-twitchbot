@@ -512,6 +512,18 @@ pub struct DetectedProcess {
     pub songs_folder: Option<String>,
 }
 
+pub fn is_process_alive(pid: u32) -> bool {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    system.process(Pid::from_u32(pid)).is_some()
+}
+
 pub fn detect_osu_processes() -> Vec<DetectedProcess> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 

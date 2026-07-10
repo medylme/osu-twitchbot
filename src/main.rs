@@ -32,7 +32,10 @@ use osu::core::{
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
 use tray::{TrayEvent, TrayStatus};
-use twitch::{TwitchClient, TwitchCommand, TwitchEvent, is_invalid_access_token_error};
+use twitch::{
+    TwitchClient, TwitchCommand, TwitchEvent, is_invalid_access_token_error,
+    is_transient_network_error,
+};
 #[cfg(not(debug_assertions))]
 use updater::core::is_auto_update_enabled;
 use updater::core::set_auto_update_enabled;
@@ -279,6 +282,16 @@ fn tray_event_subscription() -> impl iced::futures::Stream<Item = TrayEvent> {
     bridge(get_tray_event(), 10)
 }
 
+struct ReaderFailureStreak {
+    pid: u32,
+    message: String,
+    count: u32,
+    reported: bool,
+}
+
+const PERSISTENT_FAILURE_REPORT_THRESHOLD: u32 = 30;
+const ESTABLISHED_SESSION_SECS: u64 = 60;
+
 async fn osu_worker() {
     let cmd_rx = get_osu_channel().1.lock().unwrap().take();
     let Some(mut cmd_rx) = cmd_rx else {
@@ -289,6 +302,7 @@ async fn osu_worker() {
     let mut forward_tx = get_osu_event_forward().0.clone();
 
     let mut current_beatmap: Option<BeatmapData> = None;
+    let mut failure_streak: Option<ReaderFailureStreak> = None;
 
     loop {
         let _ = tx
@@ -317,6 +331,8 @@ async fn osu_worker() {
             time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
         };
 
+        let reader_started = time::Instant::now();
+
         let result = match process.client {
             OsuClient::Lazer => {
                 run_lazer_reader(
@@ -343,9 +359,57 @@ async fn osu_worker() {
         };
 
         if let Err(e) = result {
-            log_error!("osu", "Memory reader error: {:#?}", e);
-            if matches!(e, osu::core::MemoryError::AccessDenied) {
-                log_warn!("osu", "{}", osu::core::privilege_hint());
+            if !osu::core::is_process_alive(process.pid) {
+                log_info!(
+                    "osu",
+                    "osu! process exited (pid {}), last reader error: {}",
+                    process.pid,
+                    e
+                );
+                failure_streak = None;
+            } else {
+                if matches!(e, osu::core::MemoryError::AccessDenied) {
+                    log_warn!("osu", "{}", osu::core::privilege_hint());
+                }
+
+                let message = format!("{:#?}", e);
+                let established = reader_started.elapsed().as_secs() >= ESTABLISHED_SESSION_SECS;
+
+                match &mut failure_streak {
+                    Some(streak) if streak.pid == process.pid && streak.message == message => {
+                        streak.count += 1;
+                        if !streak.reported && streak.count >= PERSISTENT_FAILURE_REPORT_THRESHOLD {
+                            log_error!(
+                                "osu",
+                                "Memory reader failing persistently ({} consecutive attempts, pid {}): {:#?}",
+                                streak.count,
+                                process.pid,
+                                e
+                            );
+                            streak.reported = true;
+                        } else {
+                            log_debug!(
+                                "osu",
+                                "Memory reader error (attempt {}): {}",
+                                streak.count,
+                                e
+                            );
+                        }
+                    }
+                    _ => {
+                        if established {
+                            log_error!("osu", "Memory reader error: {:#?}", e);
+                        } else {
+                            log_warn!("osu", "Memory reader error: {:#?}", e);
+                        }
+                        failure_streak = Some(ReaderFailureStreak {
+                            pid: process.pid,
+                            message,
+                            count: 1,
+                            reported: established,
+                        });
+                    }
+                }
             }
         }
 
@@ -424,7 +488,7 @@ async fn twitch_worker() {
                                         .await
                                     {
                                         let err_s = e.to_string();
-                                        if err_s.contains("Server requested reconnect") {
+                                        if is_transient_network_error(&err_s) {
                                             log_warn!("twitch", "Websocket handler error: {}", e);
                                         } else {
                                             log_error!("twitch", "Websocket handler error: {}", e);

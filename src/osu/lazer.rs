@@ -10,7 +10,7 @@ use super::core::{
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuCommand, OsuStatus,
     ProcessMemory, order_mods, parse_pattern, privilege_hint, rate_mod_default,
 };
-use crate::{log_debug, log_error, log_info, log_warn};
+use crate::{log_debug, log_info, log_warn};
 
 fn get_latest_version(offsets_map: &HashMap<String, Offsets>) -> Option<&str> {
     offsets_map
@@ -44,7 +44,7 @@ pub async fn run_lazer_reader(
     let all_offsets_json = include_str!("../../offsets/lazer.json");
     let offsets_map: HashMap<String, Offsets> =
         serde_json::from_str(all_offsets_json).map_err(|e| {
-            log_error!("memory-lazer", "Failed to parse offsets file: {}", e);
+            log_warn!("memory-lazer", "Failed to parse offsets file: {}", e);
             MemoryError::ReadFailed(format!("Failed to parse offsets: {}", e))
         })?;
 
@@ -306,7 +306,7 @@ impl LazerReader {
         offsets_json: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let offsets: Offsets = serde_json::from_str(offsets_json).map_err(|e| {
-            log_error!("memory-lazer", "Failed to parse offsets JSON: {}", e);
+            log_warn!("memory-lazer", "Failed to parse offsets JSON: {}", e);
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
@@ -393,7 +393,7 @@ impl LazerReader {
                 ),
                 None => format!("Failed to find pattern: {}", e),
             };
-            log_error!("memory-lazer", "{}", err);
+            log_warn!("memory-lazer", "{}", err);
             return Err(err.into());
         }
 
