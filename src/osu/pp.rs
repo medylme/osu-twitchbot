@@ -82,8 +82,11 @@ fn build_mods(mods: &Option<GameplayMods>, mode: GameMode) -> GameMods {
                     "acronym": mod_info.acronym,
                     "settings": settings,
                 });
-                GameModSeed::Mode(mode)
-                    .deserialize(value)
+                GameModSeed::Mode {
+                    mode,
+                    deny_unknown_fields: false,
+                }
+                .deserialize(value)
                     .inspect_err(|e| {
                         log_warn!(
                             "osu",
