@@ -87,15 +87,15 @@ fn build_mods(mods: &Option<GameplayMods>, mode: GameMode) -> GameMods {
                     deny_unknown_fields: false,
                 }
                 .deserialize(value)
-                    .inspect_err(|e| {
-                        log_warn!(
-                            "osu",
-                            "Ignoring settings of mod {} in pp calculation: {}",
-                            mod_info.acronym,
-                            e
-                        );
-                    })
-                    .ok()
+                .inspect_err(|e| {
+                    log_warn!(
+                        "osu",
+                        "Ignoring settings of mod {} in pp calculation: {}",
+                        mod_info.acronym,
+                        e
+                    );
+                })
+                .ok()
             })
             .unwrap_or_else(|| GameMod::new(&mod_info.acronym, mode));
 
