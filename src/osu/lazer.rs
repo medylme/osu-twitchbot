@@ -325,59 +325,79 @@ impl LazerReader {
 
         const MAX_BASE_CANDIDATES: usize = 16;
 
+        // distance shifts between builds, so sweep the window
+        const EXTERNAL_LINK_OPENER_DELTAS: [isize; 7] =
+            [-0x24, -0x28, -0x2c, -0x20, -0x30, -0x1c, -0x34];
+
         let mut resolved_game_base: Option<usize> = None;
         let mut last_err: Option<String> = None;
 
         let validate = |scaling_container_target_draw_size: usize| -> bool {
-            let external_link_opener_addr = (scaling_container_target_draw_size as isize
-                + offsets.base.external_link_opener)
-                as usize;
+            let primary = offsets.base.external_link_opener;
+            let deltas = std::iter::once(primary).chain(
+                EXTERNAL_LINK_OPENER_DELTAS
+                    .into_iter()
+                    .filter(|delta| *delta != primary),
+            );
 
-            let external_link_opener = match process.read_ptr(external_link_opener_addr) {
-                Ok(ptr) if ptr != 0 => ptr,
-                Ok(_) => {
-                    last_err = Some("ExternalLinkOpener pointer is null".to_string());
-                    return false;
-                }
-                Err(e) => {
-                    last_err = Some(format!("Failed to read ExternalLinkOpener: {}", e));
-                    return false;
-                }
-            };
+            for delta in deltas {
+                let external_link_opener_addr =
+                    (scaling_container_target_draw_size as isize + delta) as usize;
 
-            let api_ptr_addr = external_link_opener + offsets.external_link_opener.api;
-            let api = match process.read_ptr(api_ptr_addr) {
-                Ok(ptr) if ptr != 0 => ptr,
-                Ok(_) => {
-                    last_err = Some("API pointer is null".to_string());
-                    return false;
-                }
-                Err(e) => {
-                    last_err = Some(format!("Failed to read API: {}", e));
-                    return false;
-                }
-            };
+                let external_link_opener = match process.read_ptr(external_link_opener_addr) {
+                    Ok(ptr) if ptr != 0 => ptr,
+                    Ok(_) => {
+                        last_err = Some("ExternalLinkOpener pointer is null".to_string());
+                        continue;
+                    }
+                    Err(e) => {
+                        last_err = Some(format!("Failed to read ExternalLinkOpener: {}", e));
+                        continue;
+                    }
+                };
 
-            let game_base_addr = api + offsets.api_access.game;
-            let ptr = match process.read_ptr(game_base_addr) {
-                Ok(ptr) if ptr != 0 => ptr,
-                Ok(_) => {
-                    last_err = Some("Game base pointer is null".to_string());
-                    return false;
-                }
-                Err(e) => {
-                    last_err = Some(format!("Failed to read game base: {}", e));
-                    return false;
-                }
-            };
+                let api_ptr_addr = external_link_opener + offsets.external_link_opener.api;
+                let api = match process.read_ptr(api_ptr_addr) {
+                    Ok(ptr) if ptr != 0 => ptr,
+                    Ok(_) => {
+                        last_err = Some("API pointer is null".to_string());
+                        continue;
+                    }
+                    Err(e) => {
+                        last_err = Some(format!("Failed to read API: {}", e));
+                        continue;
+                    }
+                };
 
-            if process.read_ptr(ptr).is_err() {
-                last_err = Some("Cannot read vtable at game base, address is invalid".to_string());
-                return false;
+                let game_base_addr = api + offsets.api_access.game;
+                let ptr = match process.read_ptr(game_base_addr) {
+                    Ok(ptr) if ptr != 0 => ptr,
+                    Ok(_) => {
+                        last_err = Some("Game base pointer is null".to_string());
+                        continue;
+                    }
+                    Err(e) => {
+                        last_err = Some(format!("Failed to read game base: {}", e));
+                        continue;
+                    }
+                };
+
+                if process.read_ptr(ptr).is_err() {
+                    last_err =
+                        Some("Cannot read vtable at game base, address is invalid".to_string());
+                    continue;
+                }
+
+                log_debug!(
+                    "memory-lazer",
+                    "Resolved game base via ExternalLinkOpener delta {}",
+                    delta
+                );
+                resolved_game_base = Some(ptr);
+                return true;
             }
 
-            resolved_game_base = Some(ptr);
-            true
+            false
         };
 
         if let Err(e) =
