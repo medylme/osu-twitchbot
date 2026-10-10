@@ -189,6 +189,8 @@ struct Offsets {
     submitting_player: SubmittingPlayer,
     #[serde(default)]
     song_select: SongSelect,
+    #[serde(default)]
+    game_base_vtable: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -329,6 +331,8 @@ impl LazerReader {
         const EXTERNAL_LINK_OPENER_DELTAS: [isize; 7] =
             [-0x24, -0x28, -0x2c, -0x20, -0x30, -0x1c, -0x34];
 
+        const FALLBACK_GAME_BASE_VTABLE: usize = 7_730_957_910_016;
+
         let mut resolved_game_base: Option<usize> = None;
         let mut last_err: Option<String> = None;
 
@@ -382,10 +386,34 @@ impl LazerReader {
                     }
                 };
 
-                if process.read_ptr(ptr).is_err() {
-                    last_err =
-                        Some("Cannot read vtable at game base, address is invalid".to_string());
-                    continue;
+                let vtable = match process.read_ptr(ptr) {
+                    Ok(vtable) if vtable != 0 => vtable,
+                    Ok(_) => {
+                        last_err = Some("Vtable pointer at game base is null".to_string());
+                        continue;
+                    }
+                    Err(e) => {
+                        last_err = Some(format!("Cannot read vtable at game base: {}", e));
+                        continue;
+                    }
+                };
+
+                let expected_vtable = offsets
+                    .game_base_vtable
+                    .unwrap_or(FALLBACK_GAME_BASE_VTABLE);
+                match process.read_ptr(vtable) {
+                    Ok(v) if v == expected_vtable => {}
+                    Ok(v) => {
+                        last_err = Some(format!(
+                            "Game base vtable mismatch: got 0x{:x}, expected 0x{:x}",
+                            v, expected_vtable
+                        ));
+                        continue;
+                    }
+                    Err(e) => {
+                        last_err = Some(format!("Cannot read game base vtable value: {}", e));
+                        continue;
+                    }
                 }
 
                 log_debug!(

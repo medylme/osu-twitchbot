@@ -61,7 +61,8 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
-    }
+    },
+    "game_base_vtable": 7834037125120
   },
   "2026.726.0": {
     "patterns": {
