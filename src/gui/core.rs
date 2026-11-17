@@ -1,18 +1,20 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::mpsc;
 
 use iced::Alignment::Center;
 use iced::widget::{
-    button, center_x, center_y, checkbox, column, container, rich_text, row, scrollable, space,
-    span, text, text_input,
+    button, center_x, center_y, checkbox, column, container, mouse_area, rich_text, row,
+    scrollable, space, span, text, text_input, tooltip,
 };
-use iced::{Element, Fill, Font, Task, window};
+use iced::{Element, Fill, Font, Task, clipboard, mouse, window};
 
 use super::components::{
     BOLD_FONT, MONO_BOLD_FONT, card_container, ghost_button, nav_button, nav_button_active,
-    primary_button, primary_text_input, rail_container, separator, window_container,
+    primary_button, primary_text_input, rail_container, separator, tooltip_container,
+    window_container,
 };
 use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
@@ -65,6 +67,8 @@ pub enum Message {
     TwitchEvent(TwitchEvent),
     LogEvent(LogEntry),
     LinkClicked(String),
+    CopyPlaceholder(&'static str),
+    PlaceholderCopyExpired(u64),
     OpenLogsClicked,
     OpenConfigClicked,
     WindowOpened(window::Id),
@@ -74,6 +78,7 @@ pub enum Message {
 }
 
 const MAX_LOG_ENTRIES: usize = 500;
+const PLACEHOLDER_COPIED_NOTICE: Duration = Duration::from_secs(3);
 
 #[allow(dead_code)]
 pub struct State {
@@ -88,6 +93,8 @@ pub struct State {
     pp_format: String,
     current_beatmap: Option<BeatmapData>,
     cached_map: Option<MapAnalysis>,
+    placeholder_copied: bool,
+    placeholder_copies: u64,
     osu_status: OsuStatus,
     osu_cmd_tx: mpsc::Sender<OsuCommand>,
     pub osu_cmd_rx: CommandReceiver<OsuCommand>,
@@ -165,6 +172,8 @@ impl State {
             pp_format,
             current_beatmap: None,
             cached_map: None,
+            placeholder_copied: false,
+            placeholder_copies: 0,
             osu_status: OsuStatus::default(),
             osu_cmd_tx,
             osu_cmd_rx,
@@ -524,48 +533,78 @@ impl State {
             _ => "None".to_string(),
         };
 
+        let copyable = |content: Element<'a, Message>, placeholder: &'static str| {
+            let hint = container(text(placeholder).size(11).font(Font::MONOSPACE))
+                .padding([4, 8])
+                .style(tooltip_container);
+
+            tooltip(
+                mouse_area(content)
+                    .on_press(Message::CopyPlaceholder(placeholder))
+                    .interaction(mouse::Interaction::Pointer),
+                hint,
+                tooltip::Position::Top,
+            )
+            .gap(4)
+        };
+
         let header = column![
-            text(beatmap.title.clone()).size(18).font(BOLD_FONT),
-            text(beatmap.artist.clone())
-                .size(13)
-                .color(p.text_secondary),
-            text(format!("[{}]", beatmap.difficulty_name))
-                .size(12)
-                .font(Font::MONOSPACE)
-                .color(p.accent),
+            copyable(
+                text(beatmap.title.clone()).size(18).font(BOLD_FONT).into(),
+                "{title}",
+            ),
+            copyable(
+                text(beatmap.artist.clone())
+                    .size(13)
+                    .color(p.text_secondary)
+                    .into(),
+                "{artist}",
+            ),
+            copyable(
+                text(format!("[{}]", beatmap.difficulty_name))
+                    .size(12)
+                    .font(Font::MONOSPACE)
+                    .color(p.accent)
+                    .into(),
+                "{diff}",
+            ),
         ]
         .spacing(2);
 
         let field = |label: &'static str| text(label).size(12).color(p.text_muted).width(84);
         let value = |v: String| text(v).size(12).font(Font::MONOSPACE).color(p.text_primary);
+        let copyable_value =
+            |v: String, placeholder: &'static str| copyable(value(v).into(), placeholder);
 
-        let link_value: Element<'_, Message> = if beatmap.id <= 0 {
-            value("Local".to_string()).into()
+        let link = if beatmap.id <= 0 {
+            "Local".to_string()
         } else {
-            let link = format!("https://osu.ppy.sh/b/{}", beatmap.id);
-            rich_text![
-                span::<String, Font>(link.clone())
-                    .color(p.accent)
-                    .underline(true)
-                    .link(link)
-                    .font(Font::MONOSPACE)
-            ]
-            .size(12)
-            .on_link_click(Message::LinkClicked)
-            .into()
+            format!("https://osu.ppy.sh/b/{}", beatmap.id)
         };
 
         let details = column![
-            row![field("Creator"), value(beatmap.creator.clone())].spacing(10),
-            row![field("Status"), value(beatmap.status.to_string())].spacing(10),
-            row![field("Mods"), value(mods_text)].spacing(10),
-            row![field("Beatmap"), link_value].spacing(10),
+            row![
+                field("Creator"),
+                copyable_value(beatmap.creator.clone(), "{creator}")
+            ]
+            .spacing(10),
+            row![
+                field("Status"),
+                copyable_value(beatmap.status.to_string(), "{status}")
+            ]
+            .spacing(10),
+            row![field("Mods"), copyable_value(mods_text, "{mods}")].spacing(10),
+            row![field("Beatmap"), copyable_value(link, "{link}")].spacing(10),
         ]
         .spacing(6);
 
-        let cell = |label: &'static str, value: String, unit: &'static str, highlight: bool| {
+        let cell = |label: &'static str,
+                    placeholder: &'static str,
+                    value: String,
+                    unit: &'static str,
+                    highlight: bool| {
             let number_color = if highlight { p.accent } else { p.text_primary };
-            container(
+            let content = container(
                 column![
                     text(label).size(11).color(p.text_secondary),
                     rich_text![
@@ -580,7 +619,9 @@ impl State {
                 .align_x(Center),
             )
             .width(Fill)
-            .align_x(Center)
+            .align_x(Center);
+
+            copyable(content.into(), placeholder)
         };
 
         let card = |title: &'static str, body: Element<'a, Message>| {
@@ -599,38 +640,47 @@ impl State {
 
         let (stats_card_body, pp_card_body) = match &self.cached_map {
             Some(MapAnalysis { stats, pp }) => {
-                let setting = |label: &'static str, value: f64| {
-                    cell(label, MapStats::setting_text(value), "", false)
+                let setting = |label: &'static str, placeholder: &'static str, value: f64| {
+                    cell(label, placeholder, MapStats::setting_text(value), "", false)
                 };
-                let pp_cell = |label: &'static str, value: f64, highlight: bool| {
-                    cell(label, format!("{value:.0}"), "pp", highlight)
+                let pp_cell = |label: &'static str,
+                               placeholder: &'static str,
+                               value: f64,
+                               highlight: bool| {
+                    cell(label, placeholder, format!("{value:.0}"), "pp", highlight)
                 };
 
                 let stats_body = column![
                     row![
-                        cell("Stars", stats.stars_text(), "", true),
-                        cell("BPM", stats.bpm_text(), "", false),
-                        cell("Length", stats.length_text(), "", false),
-                        cell("Max combo", stats.max_combo.to_string(), "x", false),
-                        cell("Objects", stats.objects.to_string(), "", false),
+                        cell("Stars", "{stars}", stats.stars_text(), "", true),
+                        cell("BPM", "{bpm}", stats.bpm_text(), "", false),
+                        cell("Length", "{length}", stats.length_text(), "", false),
+                        cell(
+                            "Max combo",
+                            "{max_combo}",
+                            stats.max_combo.to_string(),
+                            "x",
+                            false
+                        ),
+                        cell("Objects", "{objects}", stats.objects.to_string(), "", false),
                     ]
                     .spacing(10),
                     row![
-                        setting("CS", stats.cs),
-                        setting("AR", stats.ar),
-                        setting("OD", stats.od),
-                        setting("HP", stats.hp),
+                        setting("CS", "{cs}", stats.cs),
+                        setting("AR", "{ar}", stats.ar),
+                        setting("OD", "{od}", stats.od),
+                        setting("HP", "{hp}", stats.hp),
                     ]
                     .spacing(10),
                 ]
                 .spacing(12);
 
                 let pp_body = row![
-                    pp_cell("95%", pp.pp_95, false),
-                    pp_cell("97%", pp.pp_97, false),
-                    pp_cell("98%", pp.pp_98, false),
-                    pp_cell("99%", pp.pp_99, false),
-                    pp_cell("100%", pp.pp_100, true),
+                    pp_cell("95%", "{pp_95}", pp.pp_95, false),
+                    pp_cell("97%", "{pp_97}", pp.pp_97, false),
+                    pp_cell("98%", "{pp_98}", pp.pp_98, false),
+                    pp_cell("99%", "{pp_99}", pp.pp_99, false),
+                    pp_cell("100%", "{pp_100}", pp.pp_100, true),
                 ]
                 .spacing(10);
 
@@ -648,7 +698,17 @@ impl State {
         .spacing(16)
         .padding([22, 24]);
 
-        scrollable(content).height(Fill).width(Fill).into()
+        let (footer_text, footer_color) = if self.placeholder_copied {
+            ("Placeholder copied!", p.accent)
+        } else {
+            ("Click on any value to copy its placeholder", p.text_muted)
+        };
+        let footer = container(text(footer_text).size(11).color(footer_color))
+            .width(Fill)
+            .align_x(Center)
+            .padding([8, 24]);
+
+        column![scrollable(content).height(Fill).width(Fill), footer].into()
     }
 
     fn view_console_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
@@ -1086,6 +1146,23 @@ impl State {
             }
             Message::LinkClicked(url) => {
                 let _ = open::that(url);
+            }
+            Message::CopyPlaceholder(placeholder) => {
+                self.placeholder_copied = true;
+                self.placeholder_copies += 1;
+                let copy = self.placeholder_copies;
+
+                return Task::batch([
+                    clipboard::write(placeholder.to_string()),
+                    Task::perform(tokio::time::sleep(PLACEHOLDER_COPIED_NOTICE), move |()| {
+                        Message::PlaceholderCopyExpired(copy)
+                    }),
+                ]);
+            }
+            Message::PlaceholderCopyExpired(copy) => {
+                if copy == self.placeholder_copies {
+                    self.placeholder_copied = false;
+                }
             }
             Message::OpenLogsClicked => {
                 crate::logging::open_log_dir();

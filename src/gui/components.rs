@@ -128,6 +128,20 @@ pub fn card_container(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn tooltip_container(theme: &Theme) -> container::Style {
+    let p = palette(theme);
+    container::Style {
+        background: Some(p.bg_input.into()),
+        text_color: Some(p.text_primary),
+        border: Border {
+            color: p.border_default,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
 pub fn rail_container(theme: &Theme) -> container::Style {
     let p = palette(theme);
     container::Style {
