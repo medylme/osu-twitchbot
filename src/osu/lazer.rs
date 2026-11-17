@@ -48,6 +48,10 @@ pub async fn run_lazer_reader(
             MemoryError::ReadFailed(format!("Failed to parse offsets: {}", e))
         })?;
 
+    let unknown_version = version
+        .clone()
+        .filter(|version| !offsets_map.contains_key(version));
+
     let (used_version, offsets_json) = match &version {
         Some(v) if offsets_map.contains_key(v) => {
             log_debug!("memory-lazer", "Using offsets for version {}", v);
@@ -90,7 +94,13 @@ pub async fn run_lazer_reader(
     })
     .await
     .map_err(|e| MemoryError::ReadFailed(format!("Task panic: {}", e)))?
-    .map_err(MemoryError::InitFailed)?;
+    .map_err(|e| match unknown_version {
+        Some(version) if !e.contains(&MemoryError::AccessDenied.to_string()) => {
+            log_debug!("memory-lazer", "Offsets do not fit {}: {}", version, e);
+            MemoryError::UnsupportedVersion(version)
+        }
+        _ => MemoryError::InitFailed(e),
+    })?;
 
     let _ = tx
         .send(MemoryEvent::StatusChanged(OsuStatus::Connected(format!(

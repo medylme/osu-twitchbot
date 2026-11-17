@@ -26,8 +26,8 @@ use gui::core::{Message, State};
 use gui::theme::{ThemeOverride, get_current_theme, set_theme_override};
 use logging::{LogEntry, get_log_channel};
 use osu::core::{
-    DetectedProcess, MemoryEvent, OsuClient, OsuStatus, detect_osu_processes, publish_beatmap,
-    publish_profile,
+    DetectedProcess, MemoryError, MemoryEvent, OsuClient, OsuStatus, detect_osu_processes,
+    publish_beatmap, publish_profile,
 };
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
@@ -302,6 +302,17 @@ fn classify_reader_failure(
     }
 }
 
+fn first_unsupported_report(version: &str) -> bool {
+    static REPORTED: Mutex<Option<String>> = Mutex::new(None);
+
+    let mut reported = REPORTED.lock().unwrap();
+    if reported.as_deref() == Some(version) {
+        return false;
+    }
+    *reported = Some(version.to_string());
+    true
+}
+
 async fn exits_within(pid: u32, grace: Duration) -> bool {
     let deadline = time::Instant::now() + grace;
 
@@ -353,7 +364,10 @@ async fn osu_worker() {
 
         if let Err(e) = result {
             let session_secs = reader_started.elapsed().as_secs();
-            let init_failed = matches!(e, osu::core::MemoryError::InitFailed(_));
+            let init_failed = matches!(
+                e,
+                MemoryError::InitFailed(_) | MemoryError::UnsupportedVersion(_)
+            );
             // a reader that was running usually fails because the game is closing
             let exited = if init_failed {
                 !osu::core::is_process_alive(process.pid)
@@ -380,7 +394,24 @@ async fn osu_worker() {
                     log_debug!("osu", "Reader not ready yet: {}", e);
                 }
                 ReaderFailure::Failed => {
-                    if matches!(e, osu::core::MemoryError::AccessDenied) {
+                    if let MemoryError::UnsupportedVersion(version) = &e {
+                        if first_unsupported_report(version) {
+                            log_error!("osu", "{}, an update is needed", e);
+                        }
+                        let _ = tx
+                            .send(MemoryEvent::StatusChanged(OsuStatus::Unsupported(format!(
+                                "Lazer {version}"
+                            ))))
+                            .await;
+
+                        // nothing changes until the game restarts
+                        while osu::core::is_process_alive(process.pid) {
+                            time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
+                        }
+                        continue;
+                    }
+
+                    if matches!(e, MemoryError::AccessDenied) {
                         log_warn!("osu", "{}", osu::core::privilege_hint());
                     }
 
@@ -567,6 +598,13 @@ fn args_auto_update() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unsupported_version_is_reported_once() {
+        assert!(first_unsupported_report("2026.1.0"));
+        assert!(!first_unsupported_report("2026.1.0"));
+        assert!(first_unsupported_report("2026.2.0"));
+    }
 
     #[test]
     fn a_closed_game_is_never_a_failure() {

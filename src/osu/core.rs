@@ -25,6 +25,7 @@ pub enum MemoryEvent {
 pub enum MemoryError {
     ReadFailed(String),
     InitFailed(String),
+    UnsupportedVersion(String),
     InvalidString,
     ProcessNotFound,
     PatternNotFound,
@@ -37,6 +38,9 @@ impl std::fmt::Display for MemoryError {
         match self {
             MemoryError::ReadFailed(msg) => write!(f, "Failed to read memory: {}", msg),
             MemoryError::InitFailed(msg) => write!(f, "Failed to start reader: {}", msg),
+            MemoryError::UnsupportedVersion(version) => {
+                write!(f, "osu!lazer {} is not supported yet", version)
+            }
             MemoryError::InvalidString => write!(f, "Invalid string data"),
             MemoryError::ProcessNotFound => write!(f, "Process not found"),
             MemoryError::PatternNotFound => write!(f, "Pattern not found in memory"),
@@ -67,6 +71,7 @@ pub enum OsuStatus {
     Scanning,
     Initializing,
     Connected(String),
+    Unsupported(String),
 }
 
 impl Display for OsuStatus {
@@ -76,6 +81,7 @@ impl Display for OsuStatus {
             OsuStatus::Scanning => write!(f, "Scanning..."),
             OsuStatus::Initializing => write!(f, "Initializing..."),
             OsuStatus::Connected(s) => write!(f, "{}", s),
+            OsuStatus::Unsupported(s) => write!(f, "{} not supported yet", s),
         }
     }
 }
