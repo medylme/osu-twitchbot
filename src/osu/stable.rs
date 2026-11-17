@@ -12,6 +12,9 @@ use super::core::{
 };
 use crate::{log_debug, log_warn};
 
+const PROFILE_SCAN_INTERVAL: Duration = Duration::from_secs(10);
+const PROFILE_SCAN_RETRIES: u32 = 6;
+
 pub async fn run_stable_reader(
     pid: u32,
     songs_folder: Option<String>,
@@ -33,7 +36,7 @@ pub async fn run_stable_reader(
 
     let offsets_json = include_str!("../../offsets/stable.json").to_string();
 
-    let reader = tokio::task::spawn_blocking(move || {
+    let mut reader = tokio::task::spawn_blocking(move || {
         StableReader::new(pid, &offsets_json).map_err(|e| e.to_string())
     })
     .await
@@ -48,10 +51,26 @@ pub async fn run_stable_reader(
         .await;
 
     let mut interval = time::interval(Duration::from_millis(DATA_POLLING_INTERVAL_MS));
+    let mut profile_scan = time::interval_at(
+        time::Instant::now() + PROFILE_SCAN_INTERVAL,
+        PROFILE_SCAN_INTERVAL,
+    );
+    let mut profile_scans_left = PROFILE_SCAN_RETRIES;
     let mut consecutive_failures: u32 = 0;
 
     loop {
         tokio::select! {
+            _ = profile_scan.tick(), if profile_scans_left > 0 && reader.is_missing_profile() => {
+                profile_scans_left -= 1;
+                let scanner = reader.clone();
+                if let Ok(Some(addr)) =
+                    tokio::task::spawn_blocking(move || scanner.scan_user_profile()).await
+                {
+                    log_debug!("memory-stable", "Found user profile at: 0x{:X}", addr);
+                    reader.user_profile_addr = Some(addr);
+                }
+            }
+
             _ = interval.tick() => {
                 let result = {
                     let mut reader = reader.clone();
@@ -256,27 +275,35 @@ impl StableReader {
             menu_mods_addr
         );
 
-        // optional block for rank command
-        let user_profile_addr = if offsets.patterns.user_profile.is_empty() {
-            None
-        } else {
-            let (pattern, mask) = parse_pattern(&offsets.patterns.user_profile);
-            process
-                .pattern_scan(&pattern, &mask, Some(0x1_0000_0000))
-                .inspect_err(|e| {
-                    log_debug!("memory-stable", "User profile pattern not found: {}", e);
-                })
-                .ok()
-        };
-
-        Ok(Self {
+        let mut reader = Self {
             offsets,
             process: Arc::new(process),
             base_addr,
             ruleset_addr,
             menu_mods_addr,
-            user_profile_addr,
-        })
+            user_profile_addr: None,
+        };
+        reader.user_profile_addr = reader.scan_user_profile();
+
+        Ok(reader)
+    }
+
+    fn scan_user_profile(&self) -> Option<usize> {
+        if self.offsets.patterns.user_profile.is_empty() {
+            return None;
+        }
+
+        let (pattern, mask) = parse_pattern(&self.offsets.patterns.user_profile);
+        self.process
+            .pattern_scan(&pattern, &mask, Some(0x1_0000_0000))
+            .inspect_err(|e| {
+                log_debug!("memory-stable", "User profile pattern not found: {}", e);
+            })
+            .ok()
+    }
+
+    fn is_missing_profile(&self) -> bool {
+        self.user_profile_addr.is_none() && !self.offsets.patterns.user_profile.is_empty()
     }
 
     pub fn read_profile(&self) -> Option<UserProfile> {
