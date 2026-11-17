@@ -63,6 +63,9 @@ pub fn is_transient_network_error(message: &str) -> bool {
         || message.contains("os error 10054")
         || message.contains("os error 10060")
         || message.contains("ConnectionReset")
+        || message.contains("Connection reset without closing handshake")
+        || message.contains("WebSocket connection closed")
+        || message.contains("Reconnection needed")
 }
 
 #[derive(Debug, Clone)]
@@ -954,6 +957,20 @@ SliderTickRate:1
 
         std::fs::remove_dir_all(&dir).unwrap();
         reply
+    }
+
+    #[test]
+    fn dropped_connections_are_transient() {
+        for message in [
+            "WebSocket error: WebSocket protocol error: Connection reset without closing handshake",
+            "WebSocket error: IO error: An existing connection was forcibly closed by the remote host. (os error 10054)",
+            "WebSocket connection closed",
+            "Reconnection needed - please reconnect manually",
+        ] {
+            assert!(is_transient_network_error(message), "{message}");
+        }
+
+        assert!(!is_transient_network_error("Invalid OAuth token"));
     }
 
     #[test]

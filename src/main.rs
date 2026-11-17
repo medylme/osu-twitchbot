@@ -32,10 +32,7 @@ use osu::core::{
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
 use tray::{TrayEvent, TrayStatus};
-use twitch::{
-    TwitchClient, TwitchCommand, TwitchEvent, is_invalid_access_token_error,
-    is_transient_network_error,
-};
+use twitch::{TwitchClient, TwitchCommand, TwitchEvent};
 #[cfg(not(debug_assertions))]
 use updater::core::is_auto_update_enabled;
 use updater::core::set_auto_update_enabled;
@@ -471,11 +468,7 @@ async fn twitch_worker() {
                                 let ws_handle = tokio::spawn(async move {
                                     if let Err(e) = client_clone.init_websocket_handler().await {
                                         let err_s = e.to_string();
-                                        if is_transient_network_error(&err_s) {
-                                            log_warn!("twitch", "Websocket handler error: {}", e);
-                                        } else {
-                                            log_error!("twitch", "Websocket handler error: {}", e);
-                                        }
+                                        log_debug!("twitch", "Websocket handler error: {}", e);
 
                                         if err_s.contains("Server requested reconnect") {
                                             let _ = tx_clone
@@ -501,22 +494,14 @@ async fn twitch_worker() {
                             }
                             Err(e) => {
                                 let error_msg = e.to_string();
-                                if is_invalid_access_token_error(&error_msg) {
-                                    log_warn!("twitch", "Subscription error: {:#?}", e);
-                                } else {
-                                    log_error!("twitch", "Subscription error: {:#?}", e);
-                                }
+                                log_debug!("twitch", "Subscription error: {:#?}", e);
                                 let _ = tx.send(TwitchEvent::Error(error_msg)).await;
                             }
                         }
                     }
                     Err(e) => {
                         let error_msg = e.to_string();
-                        if is_invalid_access_token_error(&error_msg) {
-                            log_warn!("twitch", "Client creation error: {:#?}", e);
-                        } else {
-                            log_error!("twitch", "Client creation error: {:#?}", e);
-                        }
+                        log_debug!("twitch", "Client creation error: {:#?}", e);
                         let _ = tx.send(TwitchEvent::Error(error_msg)).await;
                     }
                 }
