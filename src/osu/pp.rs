@@ -298,7 +298,6 @@ fn difficulty_for(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuCli
 struct RatedMap {
     difficulty: Difficulty,
     attributes: DifficultyAttributes,
-    objects: u32,
     analysis: MapAnalysis,
 }
 
@@ -396,7 +395,6 @@ fn rate(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) -> Ra
     };
 
     RatedMap {
-        objects: u32::try_from(beatmap.hit_objects.len()).unwrap_or(u32::MAX),
         difficulty,
         attributes,
         analysis,
@@ -405,32 +403,38 @@ fn rate(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) -> Ra
 
 fn score_pp(rated: &RatedMap, args: &PpArgs) -> ScorePp {
     let max_combo = rated.attributes.max_combo();
-    let objects = rated.objects;
-    let misses = args.misses.unwrap_or(0).min(objects);
     let combo = args.combo.unwrap_or(max_combo).min(max_combo);
 
-    // without an acc value, assume all 300s
-    let accuracy = args.accuracy.unwrap_or_else(|| {
-        if objects == 0 {
-            100.0
-        } else {
-            100.0 * f64::from(objects - misses) / f64::from(objects)
-        }
-    });
-
-    let pp = Performance::new(rated.attributes.clone())
+    let mut performance = Performance::new(rated.attributes.clone())
         .difficulty(rated.difficulty.clone())
-        .accuracy(accuracy)
         .combo(combo)
-        .misses(misses)
-        .calculate()
-        .pp();
+        .misses(args.misses.unwrap_or(0));
+    if let Some(accuracy) = args.accuracy {
+        performance = performance.accuracy(accuracy);
+    }
+
+    let mode = match rated.attributes {
+        DifficultyAttributes::Osu(_) => MapMode::Osu,
+        DifficultyAttributes::Taiko(_) => MapMode::Taiko,
+        DifficultyAttributes::Catch(_) => MapMode::Catch,
+        DifficultyAttributes::Mania(_) => MapMode::Mania,
+    };
+    let state = performance.generate_state();
+    let hits = state.total_hits(mode);
+
+    let reachable = if hits == 0 {
+        100.0
+    } else {
+        100.0 * f64::from(hits.saturating_sub(state.misses)) / f64::from(hits)
+    };
 
     ScorePp {
-        pp,
-        accuracy,
+        pp: performance.calculate().pp(),
+        accuracy: args
+            .accuracy
+            .map_or(reachable, |accuracy| accuracy.min(reachable)),
         combo,
-        misses,
+        misses: state.misses,
     }
 }
 
@@ -807,6 +811,13 @@ SliderTickRate:1
         let score = score_with("100 9999x 9999m");
 
         assert_eq!((score.combo, score.misses), (8, 8));
+    }
+
+    #[test]
+    fn an_accuracy_the_misses_rule_out_is_lowered() {
+        assert_eq!(score_with("100 2m").accuracy, 75.0);
+        assert_eq!(score_with("50 2m").accuracy, 50.0);
+        assert_eq!(score_with("100 2m").pp, score_with("2m").pp);
     }
 
     #[test]
