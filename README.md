@@ -4,24 +4,42 @@
 
 # osu! twitchbot
 
-A lightweight desktop app that reads beatmap information from osu! and can respond to Twitch chat commands. Supports both Stable and Lazer.
+A lightweight desktop app that reads what you are doing in osu! and answers Twitch chat commands about it. Supports both Stable and Lazer.
+
+## Commands
+
+| Viewer types          | The bot replies with                                         |
+| --------------------- | ------------------------------------------------------------ |
+| `!np`                 | The current map, mods and a link                             |
+| `!pp`                 | PP for the current map at 95%, 97%, 98%, 99% and 100%        |
+| `!pp 98.5 2m +HDDT`   | PP for that score: accuracy, combo, misses and mods of choice |
+| `!rank`               | Your rank, PP, accuracy, play count and level                |
+
+```
+Artist - Title [Difficulty] (Creator) +HDDT | Ranked https://osu.ppy.sh/b/123456
+95%: 350pp | 97%: 400pp | 98%: 450pp | 99%: 500pp | 100%: 550pp (+HDDT)
+98.5% | 800x | 2 miss | 312pp (+HDDT)
+Player: #12,345 | 8,123pp | 98.76% | 54,321 plays | Lv. 100
+```
+
+Command names, replies and the cooldown are all yours to change. See [Commands](docs/commands.md) for every placeholder, including map stats such as star rating, BPM and length.
 
 ## Requirements
 
-- Windows or Linux (x86_64)
+- Windows or Linux (x86_64); Linux needs a little setup, see [Linux notes](docs/linux.md)
 - osu!stable or osu!lazer
 - A Twitch account
 
-## Usage
+## Getting Started
 
-1. Launch the app; it will automatically detect your osu! instance.
+1. Download the [latest release](https://github.com/medylme/osu-twitchbot/releases/latest) and launch it; it detects your osu! instance automatically.
 2. Visit the [companion website](https://osu-twitchbot.dyl.blue/) to get your Twitch OAuth token.
 3. Copy and enter your token, then press "Connect".
-4. Optionally, configure custom command settings.
-
-When a viewer types one of your configured commands in chat, the bot responds with the respective information. Replies share a cooldown (1 second by default), which you can change in the Commands tab.
+4. Optionally, change the commands and their replies in the Commands tab.
 
 Closing the window minimizes the app to the system tray so the bot keeps running; reopen it or quit from the tray icon.
+
+The Data tab shows everything the bot currently reads from osu!. Click any value there to copy its placeholder.
 
 ## Command-Line Arguments
 
@@ -29,103 +47,6 @@ Closing the window minimizes the app to the system tray so the bot keeps running
 | --------------- | -------------------------------------- |
 | `--theme`, `-t` | `light`, `dark`, or `system` (default) |
 | `--no-update`   | Disable auto-updater on start          |
-
-## Command Placeholders
-
-### Now Playing
-
-| Placeholder | Description     |
-| ----------- | --------------- |
-| `{artist}`  | Song artist     |
-| `{title}`   | Song title      |
-| `{diff}`    | Difficulty name |
-| `{creator}` | Mapper name     |
-| `{id}`      | Beatmap ID      |
-| `{mods}`    | Mods            |
-| `{link}`    | Beatmap link    |
-| `{status}`  | Beatmap status  |
-| `{state}`   | `Playing`, `Editing`, `Song select`, `Results` or `Idle` |
-
-Map stats, adjusted for the selected mods (e.g. DT raises `{stars}`, `{bpm}`, `{ar}` and `{od}` and shortens `{length}`). osu! maps played in another mode are rated as that mode's convert:
-
-| Placeholder   | Description                  |
-| ------------- | ---------------------------- |
-| `{stars}`     | Star rating                  |
-| `{bpm}`       | BPM                          |
-| `{length}`    | Length, first to last object |
-| `{cs}`        | Circle size                  |
-| `{ar}`        | Approach rate                |
-| `{od}`        | Overall difficulty           |
-| `{hp}`        | HP drain                     |
-| `{max_combo}` | Max combo                    |
-| `{objects}`   | Number of hit objects        |
-
-Default:
-
-```
-{artist} - {title} [{diff}] ({creator}) {mods} | {status} {link}
-```
-
-### Performance Points
-
-| Placeholder | Description        |
-| ----------- | ------------------ |
-| `{mods}`    | Mods               |
-| `{pp_95}`   | PP at 95% accuracy |
-| `{pp_97}`   | PP at 97% accuracy |
-| `{pp_98}`   | PP at 98% accuracy |
-| `{pp_99}`   | PP at 99% accuracy |
-| `{pp_100}`  | PP at 100% (SS)    |
-
-Default:
-
-```
-95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp {mods}
-```
-
-Viewers can add arguments after the command, in any order:
-
-| Argument  | Example | Description                                  |
-| --------- | ------- | -------------------------------------------- |
-| Accuracy  | `98.5`  | PP for that accuracy                         |
-| Combo     | `800x`  | Max combo of the score (only affects stable) |
-| Misses    | `2m`    | Number of misses                             |
-| Mods      | `+HDDT` | Use these mods instead of the selected ones (`+NM` for none) |
-
-Mods alone (`!pp +HDDT`) keep the format above. With an accuracy, combo or misses (`!pp 98.5 800x 2m +HDDT`) the reply uses its own format:
-
-| Placeholder | Description |
-| ----------- | ----------- |
-| `{acc}`     | Accuracy    |
-| `{combo}`   | Combo       |
-| `{misses}`  | Misses      |
-| `{pp}`      | PP          |
-| `{mods}`    | Mods        |
-
-Default:
-
-```
-{acc}% | {combo}x | {misses} miss | {pp}pp ({mods})
-```
-
-### Rank
-
-Replies with the profile of the player logged in to osu!, read from the game itself.
-
-| Placeholder   | Description |
-| ------------- | ----------- |
-| `{username}`  | Username    |
-| `{rank}`      | Global rank |
-| `{pp}`        | Total PP    |
-| `{acc}`       | Accuracy    |
-| `{playcount}` | Play count  |
-| `{level}`     | Level       |
-
-Default:
-
-```
-{username}: #{rank} | {pp}pp | {acc}% | {playcount} plays | Lv. {level}
-```
 
 ## File Locations
 
@@ -136,72 +57,9 @@ Settings are stored as `settings.toml`; logs are written to a `latest.log` (trun
 | Settings | `%APPDATA%\osu-twitchbot\config\settings.toml`   | `~/.config/osu-twitchbot/settings.toml` |
 | Logs     | `%LOCALAPPDATA%\osu-twitchbot\logs\`             | `~/.local/share/osu-twitchbot/logs/`   |
 
-## Linux Notes
-
-**Memory reading requires ptrace permission.** Most distros ship with `ptrace_scope=1`, which only allows reading a *child* process's memory — so reading an independently-launched osu! fails with a permission error. Pick one of:
-
-```bash
-# option 1: allow ptrace between your own processes (until reboot)
-sudo sysctl kernel.yama.ptrace_scope=0
-# make it permanent:
-echo "kernel.yama.ptrace_scope = 0" | sudo tee /etc/sysctl.d/10-ptrace.conf
-
-# option 2: grant the capability to the binary only
-sudo setcap cap_sys_ptrace+ep ./osu-twitchbot-linux-x86_64
-```
-
-**Token persistence requires a Secret Service daemon** (gnome-keyring or KWallet — present on any normal desktop). Without one, connecting still works but the token isn't remembered across restarts.
-
-**The tray icon requires AppIndicator support.** On GNOME, install the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/); KDE and most other desktops work out of the box. If no tray is available, closing the window quits the app instead.
-
 ## Building from Source
 
-### Prerequisites
-
-- [Rust](https://rustup.rs/)
-- [just](https://github.com/casey/just) (optional, command runner)
-- [jq](https://jqlang.github.io/jq/) (optional, for release builds)
-- A [Twitch application](https://dev.twitch.tv/console/apps) with OAuth credentials
-- A Twitch access token with scopes:
-  - `channel:bot`
-  - `user:read:chat`
-  - `user:write:chat`
-
-**Linux only:**
-
-```bash
-sudo apt install libdbus-1-dev pkg-config libgtk-3-dev libayatana-appindicator3-dev
-# to also cross-compile the Windows binary from Linux:
-sudo apt install gcc-mingw-w64-x86-64
-rustup target add x86_64-pc-windows-gnu
-```
-
-The GTK/appindicator packages are only needed for the system tray; build with `--no-default-features` to skip it.
-
-### Environment Setup
-
-Create a `.env` file in the project root:
-
-```env
-TWITCH_CLIENT_ID=your_client_id_here
-GITHUB_LATEST_RELEASE_URL=https://api.github.com/repos/medylme/osu-twitchbot/releases/latest # or set your own
-TARGET_DIR=/path/to/target  # optional, for cross-compilation
-DIST_DIR=/path/to/dist      # optional, for cross-compilation
-SENTRY_DSN=https://...      # optional, sentry error reporting
-```
-
-`TWITCH_CLIENT_ID` is compiled into the binary at build time.
-
-### Build
-
-This project uses [just](https://github.com/casey/just) as a command runner.
-
-```bash
-just dev       # Run the app
-just build     # Compile debug build
-```
-
-Check out the Justfile for all other available commands.
+See [Building from source](docs/building.md).
 
 ## Special Thanks
 
