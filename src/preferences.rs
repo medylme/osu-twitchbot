@@ -38,6 +38,7 @@ pub struct Config {
     pp_command: String,
     pp_format: String,
     pp_score_format: String,
+    cooldown_secs: u64,
     telemetry_enabled: bool,
     minimize_to_tray: bool,
 }
@@ -54,6 +55,7 @@ impl Default for Config {
             pp_command: chat.pp_command,
             pp_format: chat.pp_format,
             pp_score_format: chat.pp_score_format,
+            cooldown_secs: chat.cooldown_secs,
             telemetry_enabled: true,
             minimize_to_tray: true,
         }
@@ -124,6 +126,7 @@ impl PreferencesStore {
             pp_command: self.config.pp_command.clone(),
             pp_format: self.config.pp_format.clone(),
             pp_score_format: self.config.pp_score_format.clone(),
+            cooldown_secs: self.config.cooldown_secs,
         }
     }
 
@@ -145,6 +148,7 @@ impl PreferencesStore {
         self.config
             .pp_score_format
             .clone_from(&chat.pp_score_format);
+        self.config.cooldown_secs = chat.cooldown_secs;
         self.save()
     }
 }

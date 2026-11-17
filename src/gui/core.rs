@@ -25,9 +25,9 @@ use crate::placeholders::Placeholders;
 use crate::preferences::PreferencesStore;
 use crate::tray::{TrayEvent, TrayStatus};
 use crate::twitch::{
-    ChatSettings, DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT,
-    DEFAULT_PP_SCORE_FORMAT, INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
-    is_invalid_access_token_error, is_transient_network_error,
+    ChatSettings, DEFAULT_COOLDOWN_SECS, DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND,
+    DEFAULT_PP_FORMAT, DEFAULT_PP_SCORE_FORMAT, INVALID_ACCESS_TOKEN_STATUS, TwitchCommand,
+    TwitchEvent, TwitchStatus, is_invalid_access_token_error, is_transient_network_error,
 };
 use crate::{
     MAX_WINDOW_SIZE, MIN_WINDOW_SIZE, VERSION, get_osu_channel, get_tray_status_channel,
@@ -65,6 +65,8 @@ pub enum Message {
     ResetPpFormat,
     PpScoreFormatChanged(String),
     ResetPpScoreFormat,
+    CooldownChanged(String),
+    ResetCooldown,
     OsuEvent(MemoryEvent),
     TwitchEvent(TwitchEvent),
     LogEvent(LogEntry),
@@ -90,6 +92,7 @@ pub struct State {
     auto_connect_value: bool,
     minimize_to_tray_value: bool,
     chat: ChatSettings,
+    cooldown_input: String,
     current_beatmap: Option<BeatmapData>,
     cached_map: Option<MapAnalysis>,
     placeholder_copied: bool,
@@ -150,6 +153,7 @@ impl State {
             token_saved,
             auto_connect_value,
             minimize_to_tray_value,
+            cooldown_input: chat.cooldown_secs.to_string(),
             chat,
             current_beatmap: None,
             cached_map: None,
@@ -536,10 +540,37 @@ impl State {
             ),
         );
 
-        let commands_content =
-            column![np_section, column![pp_section, pp_score_format].spacing(10)]
-                .spacing(24)
-                .padding([22, 24]);
+        let cooldown_input = text_input("1", &self.cooldown_input)
+            .size(13)
+            .padding([8, 12])
+            .width(120)
+            .font(Font::MONOSPACE)
+            .style(primary_text_input)
+            .on_input(Message::CooldownChanged);
+
+        let global_section = column![
+            self.section_title(p, "Global"),
+            column![
+                text("Cooldown (seconds)").size(12).color(p.text_secondary),
+                row![cooldown_input, self.reset_button(Message::ResetCooldown)]
+                    .spacing(10)
+                    .align_y(Center),
+            ]
+            .spacing(5),
+            text("Minimum time between replies, shared by all commands. 0 turns it off.")
+                .size(11)
+                .color(p.text_muted)
+                .width(Fill),
+        ]
+        .spacing(10);
+
+        let commands_content = column![
+            global_section,
+            np_section,
+            column![pp_section, pp_score_format].spacing(10)
+        ]
+        .spacing(24)
+        .padding([22, 24]);
 
         scrollable(container(commands_content).width(Fill))
             .height(Fill)
@@ -1040,6 +1071,18 @@ impl State {
             }
             Message::ResetPpScoreFormat => {
                 self.chat.pp_score_format = DEFAULT_PP_SCORE_FORMAT.to_string();
+                self.chat_settings_changed();
+            }
+            Message::CooldownChanged(value) => {
+                self.cooldown_input = value.chars().filter(char::is_ascii_digit).take(4).collect();
+                if let Ok(secs) = self.cooldown_input.parse() {
+                    self.chat.cooldown_secs = secs;
+                    self.chat_settings_changed();
+                }
+            }
+            Message::ResetCooldown => {
+                self.chat.cooldown_secs = DEFAULT_COOLDOWN_SECS;
+                self.cooldown_input = DEFAULT_COOLDOWN_SECS.to_string();
                 self.chat_settings_changed();
             }
             Message::OsuEvent(event) => match event {

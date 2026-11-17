@@ -23,6 +23,7 @@ pub const DEFAULT_PP_COMMAND: &str = "!pp";
 pub const DEFAULT_PP_FORMAT: &str =
     "95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp ({mods})";
 pub const DEFAULT_PP_SCORE_FORMAT: &str = "{acc}% | {combo}x | {misses} miss | {pp}pp ({mods})";
+pub const DEFAULT_COOLDOWN_SECS: u64 = 1;
 const SOCKET_KEEPALIVE_SECONDS: u64 = 30;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -79,6 +80,7 @@ pub struct ChatSettings {
     pub pp_command: String,
     pub pp_format: String,
     pub pp_score_format: String,
+    pub cooldown_secs: u64,
 }
 
 impl Default for ChatSettings {
@@ -89,6 +91,7 @@ impl Default for ChatSettings {
             pp_command: DEFAULT_PP_COMMAND.to_string(),
             pp_format: DEFAULT_PP_FORMAT.to_string(),
             pp_score_format: DEFAULT_PP_SCORE_FORMAT.to_string(),
+            cooldown_secs: DEFAULT_COOLDOWN_SECS,
         }
     }
 }
@@ -403,7 +406,6 @@ impl TwitchClient {
         let _ = osu_tx.send(OsuCommand::RequestBeatmapData).await;
 
         let mut last_command_time: Option<Instant> = None;
-        let rate_limit_duration = Duration::from_secs(1);
 
         loop {
             let mut read = self.session.read.lock().await;
@@ -424,7 +426,6 @@ impl TwitchClient {
                                         &text,
                                         &latest_beatmap,
                                         &mut last_command_time,
-                                        rate_limit_duration,
                                     ).await {
                                         log_warn!("twitch", "Message error: {}", e);
                                     }
@@ -537,7 +538,6 @@ impl TwitchClient {
         message: &str,
         latest_beatmap: &Option<BeatmapData>,
         last_command_time: &mut Option<Instant>,
-        rate_limit_duration: Duration,
     ) -> Result<(), BoxError> {
         let message: EventMessage = serde_json::from_str(message)?;
 
@@ -580,11 +580,11 @@ impl TwitchClient {
                         if let Some(cmd_type) = command_type {
                             let now = Instant::now();
 
-                            // rate limiting
+                            let cooldown = Duration::from_secs(settings.cooldown_secs);
                             if let Some(last_time) = last_command_time
-                                && now.duration_since(*last_time) < rate_limit_duration
+                                && now.duration_since(*last_time) < cooldown
                             {
-                                log_debug!("twitch", "Rate limit hit, ignoring command");
+                                log_debug!("twitch", "On cooldown, ignoring command");
                                 return Ok(());
                             }
 

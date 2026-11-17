@@ -19,7 +19,7 @@ A lightweight desktop app that reads beatmap information from osu! and can respo
 3. Copy and enter your token, then press "Connect".
 4. Optionally, configure custom command settings.
 
-When a viewer types one of your configured commands in chat, the bot responds with the respective information.
+When a viewer types one of your configured commands in chat, the bot responds with the respective information. Replies share a cooldown (1 second by default), which you can change in the Commands tab.
 
 Closing the window minimizes the app to the system tray so the bot keeps running; reopen it or quit from the tray icon.
 
