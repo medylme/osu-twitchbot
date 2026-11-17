@@ -173,9 +173,14 @@ jobs:
             sha256sum "$f" > "$f.sha256"
           done
 
+      - name: Take release notes from the tagged commit
+        run: |
+          git log -1 --format=%b | sed -E '/^(Co-Authored-By|Signed-off-by):/Id' > release-notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
+          body_path: release-notes.md
           generate_release_notes: true
 
       - name: Trigger release notify
