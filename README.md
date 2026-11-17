@@ -45,6 +45,20 @@ Closing the window minimizes the app to the system tray so the bot keeps running
 | `{link}`    | Beatmap link    |
 | `{status}`  | Beatmap status  |
 
+Map stats, adjusted for the selected mods (e.g. DT raises `{stars}`, `{bpm}`, `{ar}` and `{od}` and shortens `{length}`):
+
+| Placeholder   | Description                  |
+| ------------- | ---------------------------- |
+| `{stars}`     | Star rating                  |
+| `{bpm}`       | BPM                          |
+| `{length}`    | Length, first to last object |
+| `{cs}`        | Circle size                  |
+| `{ar}`        | Approach rate                |
+| `{od}`        | Overall difficulty           |
+| `{hp}`        | HP drain                     |
+| `{max_combo}` | Max combo                    |
+| `{objects}`   | Number of hit objects        |
+
 Default:
 
 ```

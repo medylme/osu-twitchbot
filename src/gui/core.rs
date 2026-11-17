@@ -18,7 +18,7 @@ use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
 use crate::logging::{LogEntry, LogLevel};
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
-use crate::osu::pp::get_pp_spread;
+use crate::osu::pp::{MapAnalysis, MapStats, analyze_map};
 use crate::placeholders::Placeholders;
 use crate::preferences::PreferencesStore;
 use crate::tray::{TrayEvent, TrayStatus};
@@ -87,7 +87,7 @@ pub struct State {
     pp_command: String,
     pp_format: String,
     current_beatmap: Option<BeatmapData>,
-    cached_pp: Option<crate::osu::pp::PpValues>,
+    cached_map: Option<MapAnalysis>,
     osu_status: OsuStatus,
     osu_cmd_tx: mpsc::Sender<OsuCommand>,
     pub osu_cmd_rx: CommandReceiver<OsuCommand>,
@@ -164,7 +164,7 @@ impl State {
             pp_command,
             pp_format,
             current_beatmap: None,
-            cached_pp: None,
+            cached_map: None,
             osu_status: OsuStatus::default(),
             osu_cmd_tx,
             osu_cmd_rx,
@@ -459,7 +459,7 @@ impl State {
                     .align_y(Center),
             ]
             .spacing(5),
-            text(help).size(11).color(p.text_muted),
+            text(help).size(11).color(p.text_muted).width(Fill),
             preview,
         ]
         .spacing(10)
@@ -478,7 +478,10 @@ impl State {
             DEFAULT_NP_FORMAT,
             Message::NpFormatChanged,
             Message::ResetNpFormat,
-            "Placeholders: {artist} {title} {diff} {creator} {mods} {status} {link}",
+            concat!(
+                "Placeholders: {artist} {title} {diff} {creator} {mods} {status} {link} ",
+                "{stars} {bpm} {length} {cs} {ar} {od} {hp} {max_combo} {objects}",
+            ),
             self.build_np_format_preview(p),
         );
 
@@ -506,7 +509,7 @@ impl State {
             .into()
     }
 
-    fn view_data_tab(&self, p: &ColorPalette) -> Element<'_, Message> {
+    fn view_data_tab<'a>(&'a self, p: &ColorPalette) -> Element<'a, Message> {
         let Some(beatmap) = &self.current_beatmap else {
             let no_data = text("No beatmap selected").size(13).color(p.text_secondary);
             let hint = text("Launch osu! and select a beatmap to see data here!")
@@ -560,58 +563,90 @@ impl State {
         ]
         .spacing(6);
 
-        let pp_card_body: Element<'_, Message> = match &self.cached_pp {
-            Some(pp) => {
-                let cell = |acc: &'static str, value: f64, highlight: bool| {
-                    let number_color = if highlight { p.accent } else { p.text_primary };
-                    container(
-                        column![
-                            text(acc).size(11).color(p.text_secondary),
-                            rich_text![
-                                span::<String, Font>(format!("{:.0}", value))
-                                    .color(number_color)
-                                    .font(MONO_BOLD_FONT),
-                                span::<String, Font>("pp").color(p.text_muted),
-                            ]
-                            .size(16),
-                        ]
-                        .spacing(2)
-                        .align_x(Center),
-                    )
-                    .width(Fill)
-                    .align_x(Center)
-                };
-
-                row![
-                    cell("95%", pp.pp_95, false),
-                    cell("97%", pp.pp_97, false),
-                    cell("98%", pp.pp_98, false),
-                    cell("99%", pp.pp_99, false),
-                    cell("100%", pp.pp_100, true),
+        let cell = |label: &'static str, value: String, unit: &'static str, highlight: bool| {
+            let number_color = if highlight { p.accent } else { p.text_primary };
+            container(
+                column![
+                    text(label).size(11).color(p.text_secondary),
+                    rich_text![
+                        span::<String, Font>(value)
+                            .color(number_color)
+                            .font(MONO_BOLD_FONT),
+                        span::<String, Font>(unit).color(p.text_muted),
+                    ]
+                    .size(16),
                 ]
-                .spacing(10)
-                .into()
-            }
-            None => text("Not available for this beatmap")
-                .size(12)
-                .color(p.text_muted)
-                .into(),
+                .spacing(2)
+                .align_x(Center),
+            )
+            .width(Fill)
+            .align_x(Center)
         };
 
-        let pp_card = container(
-            column![
-                text("Performance Points").size(10).color(p.text_muted),
-                pp_card_body,
-            ]
-            .spacing(10),
-        )
-        .padding(14)
-        .width(Fill)
-        .style(card_container);
+        let card = |title: &'static str, body: Element<'a, Message>| {
+            container(column![text(title).size(10).color(p.text_muted), body].spacing(10))
+                .padding(14)
+                .width(Fill)
+                .style(card_container)
+        };
 
-        let content = column![header, details, pp_card]
-            .spacing(16)
-            .padding([22, 24]);
+        let unavailable = || -> Element<'a, Message> {
+            text("Not available for this beatmap")
+                .size(12)
+                .color(p.text_muted)
+                .into()
+        };
+
+        let (stats_card_body, pp_card_body) = match &self.cached_map {
+            Some(MapAnalysis { stats, pp }) => {
+                let setting = |label: &'static str, value: f64| {
+                    cell(label, MapStats::setting_text(value), "", false)
+                };
+                let pp_cell = |label: &'static str, value: f64, highlight: bool| {
+                    cell(label, format!("{value:.0}"), "pp", highlight)
+                };
+
+                let stats_body = column![
+                    row![
+                        cell("Stars", stats.stars_text(), "", true),
+                        cell("BPM", stats.bpm_text(), "", false),
+                        cell("Length", stats.length_text(), "", false),
+                        cell("Max combo", stats.max_combo.to_string(), "x", false),
+                        cell("Objects", stats.objects.to_string(), "", false),
+                    ]
+                    .spacing(10),
+                    row![
+                        setting("CS", stats.cs),
+                        setting("AR", stats.ar),
+                        setting("OD", stats.od),
+                        setting("HP", stats.hp),
+                    ]
+                    .spacing(10),
+                ]
+                .spacing(12);
+
+                let pp_body = row![
+                    pp_cell("95%", pp.pp_95, false),
+                    pp_cell("97%", pp.pp_97, false),
+                    pp_cell("98%", pp.pp_98, false),
+                    pp_cell("99%", pp.pp_99, false),
+                    pp_cell("100%", pp.pp_100, true),
+                ]
+                .spacing(10);
+
+                (stats_body.into(), pp_body.into())
+            }
+            None => (unavailable(), unavailable()),
+        };
+
+        let content = column![
+            header,
+            details,
+            card("Map Stats", stats_card_body),
+            card("Performance Points", pp_card_body),
+        ]
+        .spacing(16)
+        .padding([22, 24]);
 
         scrollable(content).height(Fill).width(Fill).into()
     }
@@ -711,19 +746,25 @@ impl State {
             .into()
     }
 
+    fn map_stats(&self) -> Option<&MapStats> {
+        self.cached_map.as_ref().map(|analysis| &analysis.stats)
+    }
+
     fn build_np_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
         let placeholders = self
             .current_beatmap
             .as_ref()
-            .map(Placeholders::from_beatmap)
+            .map(|beatmap| Placeholders::from_beatmap(beatmap).with_stats(self.map_stats()))
             .unwrap_or_else(Placeholders::sample);
 
         self.chat_preview(p, placeholders.apply_np(&self.np_format))
     }
 
     fn build_pp_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
-        let placeholders = match (&self.current_beatmap, &self.cached_pp) {
-            (Some(beatmap), Some(pp)) => Placeholders::from_beatmap(beatmap).with_pp(pp),
+        let placeholders = match (&self.current_beatmap, &self.cached_map) {
+            (Some(beatmap), Some(analysis)) => {
+                Placeholders::from_beatmap(beatmap).with_pp(&analysis.pp)
+            }
             _ => Placeholders::sample_pp(),
         };
 
@@ -1002,8 +1043,8 @@ impl State {
                     self.osu_status = status.clone();
                 }
                 MemoryEvent::BeatmapChanged(beatmap) => {
-                    self.cached_pp = beatmap.as_ref().and_then(|b| {
-                        get_pp_spread(
+                    self.cached_map = beatmap.as_ref().and_then(|b| {
+                        analyze_map(
                             &b.mods,
                             b.osu_file_path.as_deref(),
                             b.songs_folder.as_deref(),

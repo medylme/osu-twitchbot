@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand};
-use crate::osu::pp::get_pp_spread;
+use crate::osu::pp::analyze_map;
 use crate::placeholders::Placeholders;
 use crate::{log_debug, log_error, log_info, log_warn};
 
@@ -554,20 +554,33 @@ impl TwitchClient {
     }
 
     async fn build_reply(&self, command_type: &CommandType, beatmap: &BeatmapData) -> String {
+        let analyze = || {
+            analyze_map(
+                &beatmap.mods,
+                beatmap.osu_file_path.as_deref(),
+                beatmap.songs_folder.as_deref(),
+            )
+        };
+
         match command_type {
             CommandType::NowPlaying => {
                 let format_template = self.chatbot_preferences.np.format.lock().await.clone();
-                Placeholders::from_beatmap(beatmap).apply_np(&format_template)
+                let mut placeholders = Placeholders::from_beatmap(beatmap);
+
+                if Placeholders::uses_stats(&format_template) {
+                    let analysis = analyze()
+                        .inspect_err(|e| log_debug!("twitch", "map stats not available: {}", e))
+                        .ok();
+                    placeholders = placeholders.with_stats(analysis.as_ref().map(|a| &a.stats));
+                }
+
+                placeholders.apply_np(&format_template)
             }
             CommandType::PerformancePoints => {
                 let pp_format_template = self.chatbot_preferences.pp.format.lock().await.clone();
-                match get_pp_spread(
-                    &beatmap.mods,
-                    beatmap.osu_file_path.as_deref(),
-                    beatmap.songs_folder.as_deref(),
-                ) {
-                    Ok(pp_values) => Placeholders::from_beatmap(beatmap)
-                        .with_pp(&pp_values)
+                match analyze() {
+                    Ok(analysis) => Placeholders::from_beatmap(beatmap)
+                        .with_pp(&analysis.pp)
                         .apply_pp(&pp_format_template),
                     Err(e) => {
                         log_debug!("twitch", "pp not available: {}", e);
