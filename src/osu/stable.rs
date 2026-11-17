@@ -46,7 +46,6 @@ pub async fn run_stable_reader(
         .await;
 
     let mut interval = time::interval(Duration::from_millis(DATA_POLLING_INTERVAL_MS));
-    let mut last_beatmap_id: Option<i32> = None;
     let mut consecutive_failures: u32 = 0;
 
     loop {
@@ -54,20 +53,22 @@ pub async fn run_stable_reader(
             _ = interval.tick() => {
                 let result = {
                     let mut reader = reader.clone();
-                    tokio::task::spawn_blocking(move || reader.read_beatmap()).await
+                    let songs_folder = songs_folder.clone();
+                    tokio::task::spawn_blocking(move || {
+                        reader.read_beatmap().map(|mut beatmap| {
+                            beatmap.songs_folder = songs_folder;
+                            beatmap.stamp_file();
+                            beatmap
+                        })
+                    })
+                    .await
                 };
 
                 match result {
-                    Ok(Ok(mut beatmap)) => {
+                    Ok(Ok(beatmap)) => {
                         consecutive_failures = 0;
-                        beatmap.songs_folder = songs_folder.clone();
 
-                        let mods_changed =
-                            current_beatmap.as_ref().map(|b| &b.mods) != Some(&beatmap.mods);
-                        let beatmap_changed = last_beatmap_id != Some(beatmap.id);
-
-                        if beatmap_changed || mods_changed {
-                            last_beatmap_id = Some(beatmap.id);
+                        if current_beatmap.as_ref() != Some(&beatmap) {
                             *current_beatmap = Some(beatmap.clone());
                             let event = MemoryEvent::BeatmapChanged(Some(beatmap));
                             let _ = tx.send(event.clone()).await;
@@ -339,6 +340,7 @@ impl StableReader {
             mods: None,
             osu_file_path: None,
             songs_folder: None,
+            file_stamp: None,
         };
 
         if self.base_addr == 0 {
@@ -435,6 +437,7 @@ impl StableReader {
             mods,
             osu_file_path,
             songs_folder: None,
+            file_stamp: None,
         })
     }
 }

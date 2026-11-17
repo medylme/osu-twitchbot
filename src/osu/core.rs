@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::io;
 use std::path::Path;
+use std::time::SystemTime;
 
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -81,7 +82,7 @@ impl Display for OsuStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BeatmapStatus {
     Unknown,
     NotSubmitted,
@@ -125,7 +126,7 @@ pub struct GameplayMods {
     pub mods_string: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BeatmapData {
     pub id: i32,
     pub artist: String,
@@ -136,6 +137,19 @@ pub struct BeatmapData {
     pub mods: Option<GameplayMods>,
     pub osu_file_path: Option<String>,
     pub songs_folder: Option<String>,
+    // modified time and size of the .osu file, changes when the map is saved
+    pub file_stamp: Option<(SystemTime, u64)>,
+}
+
+impl BeatmapData {
+    pub fn stamp_file(&mut self) {
+        self.file_stamp = match (&self.songs_folder, &self.osu_file_path) {
+            (Some(songs), Some(rel)) => std::fs::metadata(Path::new(songs).join(rel))
+                .ok()
+                .and_then(|m| Some((m.modified().ok()?, m.len()))),
+            _ => None,
+        };
+    }
 }
 
 #[cfg(windows)]
@@ -810,5 +824,48 @@ mod tests {
             Some(serde_json::json!({ "approach_rate": 10.0 })),
         )];
         assert_eq!(order_mods(&mut mods), "DA");
+    }
+
+    fn beatmap_at(songs_folder: &Path, file: &str) -> BeatmapData {
+        let mut beatmap = BeatmapData {
+            id: 0,
+            artist: "artist".to_string(),
+            title: "title".to_string(),
+            difficulty_name: "diff".to_string(),
+            creator: "creator".to_string(),
+            status: BeatmapStatus::NotSubmitted,
+            mods: None,
+            osu_file_path: Some(file.to_string()),
+            songs_folder: songs_folder.to_str().map(str::to_string),
+            file_stamp: None,
+        };
+        beatmap.stamp_file();
+        beatmap
+    }
+
+    #[test]
+    fn saving_the_map_file_changes_the_beatmap() {
+        let dir = std::env::temp_dir().join(format!("osu-twitchbot-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("map.osu"), "one object").unwrap();
+
+        let before = beatmap_at(&dir, "map.osu");
+        assert_eq!(before, beatmap_at(&dir, "map.osu"));
+
+        std::fs::write(dir.join("map.osu"), "one object, then another").unwrap();
+        let after = beatmap_at(&dir, "map.osu");
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn unsubmitted_difficulties_with_the_same_id_differ() {
+        let dir = Path::new("missing");
+        let mut other = beatmap_at(dir, "a.osu");
+        other.difficulty_name = "other diff".to_string();
+        other.osu_file_path = Some("b.osu".to_string());
+
+        assert_ne!(beatmap_at(dir, "a.osu"), other);
     }
 }

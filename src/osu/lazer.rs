@@ -95,7 +95,6 @@ pub async fn run_lazer_reader(
         .await;
 
     let mut interval = time::interval(Duration::from_millis(DATA_POLLING_INTERVAL_MS));
-    let mut last_beatmap_id: Option<i32> = None;
     let mut consecutive_failures: u32 = 0;
 
     loop {
@@ -116,11 +115,8 @@ pub async fn run_lazer_reader(
                         if reader.mod_vtable_map.is_empty() && !vtable_map.is_empty() {
                             reader.mod_vtable_map = vtable_map;
                         }
-                        let mods_changed = current_beatmap.as_ref().map(|b| &b.mods) != Some(&beatmap.mods);
-                        let beatmap_changed = last_beatmap_id != Some(beatmap.id);
 
-                        if beatmap_changed || mods_changed {
-                            last_beatmap_id = Some(beatmap.id);
+                        if current_beatmap.as_ref() != Some(&beatmap) {
                             *current_beatmap = Some(beatmap.clone());
                             let event = MemoryEvent::BeatmapChanged(Some(beatmap));
                             let _ = tx.send(event.clone()).await;
@@ -709,6 +705,7 @@ impl LazerReader {
             mods: None,
             osu_file_path: None,
             songs_folder: None,
+            file_stamp: None,
         };
 
         if self.game_base == 0 {
@@ -852,6 +849,7 @@ impl LazerReader {
             mods,
             osu_file_path,
             songs_folder,
+            file_stamp: None,
         })
     }
 
