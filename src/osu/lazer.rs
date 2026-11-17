@@ -13,6 +13,8 @@ use super::core::{
 };
 use crate::{log_debug, log_info, log_warn};
 
+static UNKNOWN_VERSION_WARNED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 fn get_latest_version(offsets_map: &HashMap<String, Offsets>) -> Option<&str> {
     offsets_map
         .keys()
@@ -52,17 +54,22 @@ pub async fn run_lazer_reader(
 
     let (used_version, offsets_json) = match &version {
         Some(v) if offsets_map.contains_key(v) => {
-            log_info!("memory-lazer", "Using offsets for version {}", v);
+            log_debug!("memory-lazer", "Using offsets for version {}", v);
             (v.clone(), serde_json::to_string(&offsets_map[v]).unwrap())
         }
         Some(v) => {
             let latest = get_latest_version(&offsets_map).unwrap_or("unknown");
-            log_warn!(
-                "memory-lazer",
-                "Version {} not found in offsets, using latest ({})",
-                v,
-                latest
-            );
+            let mut warned = UNKNOWN_VERSION_WARNED.lock().unwrap();
+            if warned.as_ref() != Some(v) {
+                log_warn!(
+                    "memory-lazer",
+                    "Version {} not found in offsets, using latest ({})",
+                    v,
+                    latest
+                );
+                *warned = Some(v.clone());
+            }
+            drop(warned);
             (
                 latest.to_string(),
                 serde_json::to_string(&offsets_map[latest]).unwrap(),
@@ -87,7 +94,7 @@ pub async fn run_lazer_reader(
     })
     .await
     .map_err(|e| MemoryError::ReadFailed(format!("Task panic: {}", e)))?
-    .map_err(MemoryError::ReadFailed)?;
+    .map_err(MemoryError::InitFailed)?;
 
     let _ = tx
         .send(MemoryEvent::StatusChanged(OsuStatus::Connected(format!(
@@ -376,8 +383,10 @@ impl LazerReader {
         let process = match ProcessMemory::new(pid) {
             Ok(p) => p,
             Err(e) => {
-                log_warn!("memory-lazer", "Failed to open process: {}", e);
-                log_warn!("memory-lazer", "{}", privilege_hint());
+                log_debug!("memory-lazer", "Failed to open process: {}", e);
+                if matches!(e, MemoryError::AccessDenied) {
+                    log_warn!("memory-lazer", "{}", privilege_hint());
+                }
                 return Err(Box::new(e));
             }
         };
@@ -502,7 +511,7 @@ impl LazerReader {
                 ),
                 None => format!("Failed to find pattern: {}", e),
             };
-            log_warn!("memory-lazer", "{}", err);
+            log_debug!("memory-lazer", "{}", err);
             return Err(err.into());
         }
 

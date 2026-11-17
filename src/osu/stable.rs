@@ -38,7 +38,7 @@ pub async fn run_stable_reader(
     })
     .await
     .map_err(|e| MemoryError::ReadFailed(format!("Task panic: {}", e)))?
-    .map_err(MemoryError::ReadFailed)?;
+    .map_err(MemoryError::InitFailed)?;
 
     let _ = tx
         .send(MemoryEvent::StatusChanged(OsuStatus::Connected(format!(
@@ -204,7 +204,7 @@ fn scan_pattern(
             Ok(addr)
         }
         Err(e) => {
-            log_warn!("memory-stable", "Failed to find {} pattern: {}", name, e);
+            log_debug!("memory-stable", "Failed to find {} pattern: {}", name, e);
             if matches!(e, MemoryError::AccessDenied) {
                 log_warn!("memory-stable", "{}", privilege_hint());
             }
@@ -236,8 +236,10 @@ impl StableReader {
         let process = match ProcessMemory::new(pid) {
             Ok(p) => p,
             Err(e) => {
-                log_warn!("memory-stable", "Failed to open process: {}", e);
-                log_warn!("memory-stable", "{}", privilege_hint());
+                log_debug!("memory-stable", "Failed to open process: {}", e);
+                if matches!(e, MemoryError::AccessDenied) {
+                    log_warn!("memory-stable", "{}", privilege_hint());
+                }
                 return Err(Box::new(e));
             }
         };

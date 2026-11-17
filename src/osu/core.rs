@@ -29,6 +29,7 @@ pub enum MemoryEvent {
 #[allow(dead_code)]
 pub enum MemoryError {
     ReadFailed(String),
+    InitFailed(String),
     InvalidString,
     ProcessNotFound,
     PatternNotFound,
@@ -40,6 +41,7 @@ impl std::fmt::Display for MemoryError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             MemoryError::ReadFailed(msg) => write!(f, "Failed to read memory: {}", msg),
+            MemoryError::InitFailed(msg) => write!(f, "Failed to start reader: {}", msg),
             MemoryError::InvalidString => write!(f, "Invalid string data"),
             MemoryError::ProcessNotFound => write!(f, "Process not found"),
             MemoryError::PatternNotFound => write!(f, "Pattern not found in memory"),
@@ -636,6 +638,7 @@ pub struct DetectedProcess {
     pub pid: u32,
     pub version: Option<String>,
     pub songs_folder: Option<String>,
+    pub run_time_secs: u64,
 }
 
 pub fn is_process_alive(pid: u32) -> bool {
@@ -707,6 +710,7 @@ pub fn detect_osu_processes() -> Vec<DetectedProcess> {
                 pid: pid.as_u32(),
                 version,
                 songs_folder,
+                run_time_secs: process.run_time(),
             });
             found[index] = true;
         }

@@ -291,6 +291,44 @@ struct ReaderFailureStreak {
 
 const PERSISTENT_FAILURE_REPORT_THRESHOLD: u32 = 30;
 const ESTABLISHED_SESSION_SECS: u64 = 60;
+const STARTUP_GRACE_SECS: u64 = 60;
+const EXIT_GRACE: Duration = Duration::from_secs(10);
+const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+#[derive(Debug, PartialEq)]
+enum ReaderFailure {
+    Exited,
+    StartingUp,
+    Failed,
+}
+
+fn classify_reader_failure(
+    exited: bool,
+    init_failed: bool,
+    process_age_secs: u64,
+) -> ReaderFailure {
+    if exited {
+        ReaderFailure::Exited
+    } else if init_failed && process_age_secs < STARTUP_GRACE_SECS {
+        ReaderFailure::StartingUp
+    } else {
+        ReaderFailure::Failed
+    }
+}
+
+async fn exits_within(pid: u32, grace: Duration) -> bool {
+    let deadline = time::Instant::now() + grace;
+
+    loop {
+        if !osu::core::is_process_alive(pid) {
+            return true;
+        }
+        if time::Instant::now() >= deadline {
+            return false;
+        }
+        time::sleep(EXIT_POLL_INTERVAL).await;
+    }
+}
 
 async fn osu_worker() {
     let cmd_rx = get_osu_channel().1.lock().unwrap().take();
@@ -304,6 +342,7 @@ async fn osu_worker() {
     let mut current_beatmap: Option<BeatmapData> = None;
     let mut current_profile: Option<UserProfile> = None;
     let mut failure_streak: Option<ReaderFailureStreak> = None;
+    let mut startup_notice_pid: Option<u32> = None;
 
     loop {
         let _ = tx
@@ -360,61 +399,6 @@ async fn osu_worker() {
             }
         };
 
-        if let Err(e) = result {
-            if !osu::core::is_process_alive(process.pid) {
-                log_info!(
-                    "osu",
-                    "osu! process exited (pid {}), last reader error: {}",
-                    process.pid,
-                    e
-                );
-                failure_streak = None;
-            } else {
-                if matches!(e, osu::core::MemoryError::AccessDenied) {
-                    log_warn!("osu", "{}", osu::core::privilege_hint());
-                }
-
-                let message = format!("{:#?}", e);
-                let established = reader_started.elapsed().as_secs() >= ESTABLISHED_SESSION_SECS;
-
-                match &mut failure_streak {
-                    Some(streak) if streak.pid == process.pid && streak.message == message => {
-                        streak.count += 1;
-                        if !streak.reported && streak.count >= PERSISTENT_FAILURE_REPORT_THRESHOLD {
-                            log_error!(
-                                "osu",
-                                "Memory reader failing persistently ({} consecutive attempts, pid {}): {:#?}",
-                                streak.count,
-                                process.pid,
-                                e
-                            );
-                            streak.reported = true;
-                        } else {
-                            log_debug!(
-                                "osu",
-                                "Memory reader error (attempt {}): {}",
-                                streak.count,
-                                e
-                            );
-                        }
-                    }
-                    _ => {
-                        if established {
-                            log_error!("osu", "Memory reader error: {:#?}", e);
-                        } else {
-                            log_warn!("osu", "Memory reader error: {:#?}", e);
-                        }
-                        failure_streak = Some(ReaderFailureStreak {
-                            pid: process.pid,
-                            message,
-                            count: 1,
-                            reported: established,
-                        });
-                    }
-                }
-            }
-        }
-
         current_beatmap = None;
         current_profile = None;
         for event in [
@@ -428,6 +412,84 @@ async fn osu_worker() {
         let _ = tx
             .send(MemoryEvent::StatusChanged(OsuStatus::Disconnected))
             .await;
+
+        if let Err(e) = result {
+            let session_secs = reader_started.elapsed().as_secs();
+            let init_failed = matches!(e, osu::core::MemoryError::InitFailed(_));
+            // a reader that was running usually fails because the game is closing
+            let exited = if init_failed {
+                !osu::core::is_process_alive(process.pid)
+            } else {
+                exits_within(process.pid, EXIT_GRACE).await
+            };
+            let process_age_secs = process.run_time_secs + session_secs;
+
+            match classify_reader_failure(exited, init_failed, process_age_secs) {
+                ReaderFailure::Exited => {
+                    log_debug!(
+                        "osu",
+                        "osu! process exited (pid {}), last reader error: {}",
+                        process.pid,
+                        e
+                    );
+                    failure_streak = None;
+                }
+                ReaderFailure::StartingUp => {
+                    if startup_notice_pid != Some(process.pid) {
+                        log_info!("osu", "Waiting for osu! to finish starting...");
+                        startup_notice_pid = Some(process.pid);
+                    }
+                    log_debug!("osu", "Reader not ready yet: {}", e);
+                }
+                ReaderFailure::Failed => {
+                    if matches!(e, osu::core::MemoryError::AccessDenied) {
+                        log_warn!("osu", "{}", osu::core::privilege_hint());
+                    }
+
+                    let message = format!("{:#?}", e);
+                    let established = session_secs >= ESTABLISHED_SESSION_SECS;
+
+                    match &mut failure_streak {
+                        Some(streak) if streak.pid == process.pid && streak.message == message => {
+                            streak.count += 1;
+                            if !streak.reported
+                                && streak.count >= PERSISTENT_FAILURE_REPORT_THRESHOLD
+                            {
+                                log_error!(
+                                    "osu",
+                                    "Memory reader failing persistently ({} consecutive attempts, pid {}): {:#?}",
+                                    streak.count,
+                                    process.pid,
+                                    e
+                                );
+                                streak.reported = true;
+                            } else {
+                                log_debug!(
+                                    "osu",
+                                    "Memory reader error (attempt {}): {}",
+                                    streak.count,
+                                    e
+                                );
+                            }
+                        }
+                        _ => {
+                            if established {
+                                log_error!("osu", "Memory reader error: {:#?}", e);
+                            } else {
+                                log_warn!("osu", "Memory reader error: {:#?}", e);
+                            }
+                            failure_streak = Some(ReaderFailureStreak {
+                                pid: process.pid,
+                                message,
+                                count: 1,
+                                reported: established,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         time::sleep(Duration::from_millis(PROCESS_SCAN_INTERVAL_MS)).await;
     }
 }
@@ -594,4 +656,41 @@ fn args_auto_update() -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_closed_game_is_never_a_failure() {
+        assert_eq!(
+            classify_reader_failure(true, false, 3600),
+            ReaderFailure::Exited
+        );
+        assert_eq!(
+            classify_reader_failure(true, true, 5),
+            ReaderFailure::Exited
+        );
+    }
+
+    #[test]
+    fn a_fresh_game_gets_time_to_start() {
+        assert_eq!(
+            classify_reader_failure(false, true, 5),
+            ReaderFailure::StartingUp
+        );
+        assert_eq!(
+            classify_reader_failure(false, true, STARTUP_GRACE_SECS),
+            ReaderFailure::Failed
+        );
+    }
+
+    #[test]
+    fn a_running_reader_that_breaks_is_a_failure() {
+        assert_eq!(
+            classify_reader_failure(false, false, 5),
+            ReaderFailure::Failed
+        );
+    }
 }
