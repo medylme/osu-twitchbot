@@ -7,9 +7,9 @@ use tokio::time::{self, Duration};
 
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
-    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
-    OsuStatus, ProcessMemory, UserProfile, decimal_to_f64, known_ruleset, order_mods,
-    parse_pattern, privilege_hint, publish_profile, rate_mod_default, send_current_data,
+    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuStatus,
+    ProcessMemory, UserProfile, decimal_to_f64, known_ruleset, order_mods, parse_pattern,
+    privilege_hint, publish_beatmap, publish_profile, rate_mod_default,
 };
 use crate::{log_debug, log_info, log_warn};
 
@@ -30,10 +30,6 @@ pub async fn run_lazer_reader(
     pid: u32,
     version: Option<String>,
     tx: &mut mpsc::Sender<MemoryEvent>,
-    cmd_rx: &mut mpsc::Receiver<OsuCommand>,
-    forward_tx: &mut mpsc::Sender<MemoryEvent>,
-    current_beatmap: &mut Option<BeatmapData>,
-    current_profile: &mut Option<UserProfile>,
 ) -> Result<(), MemoryError> {
     log_debug!(
         "memory-lazer",
@@ -107,64 +103,46 @@ pub async fn run_lazer_reader(
     let mut consecutive_failures: u32 = 0;
 
     loop {
-        tokio::select! {
-            _ = interval.tick() => {
-                let result = {
-                    let mut r = reader.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let res = r.read_beatmap();
-                        (res, r.read_profile(), r.mod_vtable_map)
-                    })
-                    .await
-                };
+        interval.tick().await;
 
-                match result {
-                    Ok((Ok(beatmap), profile, vtable_map)) => {
-                        consecutive_failures = 0;
-                        publish_profile(profile, current_profile, tx, forward_tx).await;
-                        if reader.mod_vtable_map.is_empty() && !vtable_map.is_empty() {
-                            reader.mod_vtable_map = vtable_map;
-                        }
+        let result = {
+            let mut r = reader.clone();
+            tokio::task::spawn_blocking(move || {
+                let res = r.read_beatmap();
+                (res, r.read_profile(), r.mod_vtable_map)
+            })
+            .await
+        };
 
-                        if current_beatmap.as_ref() != Some(&beatmap) {
-                            *current_beatmap = Some(beatmap.clone());
-                            let event = MemoryEvent::BeatmapChanged(Some(beatmap));
-                            let _ = tx.send(event.clone()).await;
-                            let _ = forward_tx.try_send(event);
-                        }
-                    }
-                    Ok((Err(e), _, _)) => {
-                        if matches!(e, MemoryError::ProcessNotFound | MemoryError::AccessDenied) {
-                            return Err(e);
-                        }
+        match result {
+            Ok((Ok(beatmap), profile, vtable_map)) => {
+                consecutive_failures = 0;
+                publish_profile(profile, tx).await;
+                if reader.mod_vtable_map.is_empty() && !vtable_map.is_empty() {
+                    reader.mod_vtable_map = vtable_map;
+                }
 
-                        consecutive_failures += 1;
-                        log_debug!(
-                            "memory-lazer",
-                            "Beatmap read failed ({}/{}): {}",
-                            consecutive_failures,
-                            MAX_CONSECUTIVE_READ_FAILURES,
-                            e
-                        );
-                        if consecutive_failures >= MAX_CONSECUTIVE_READ_FAILURES {
-                            return Err(e);
-                        }
-                    }
-                    Err(e) => {
-                        return Err(MemoryError::ReadFailed(format!("Task panic: {}", e)));
-                    }
+                publish_beatmap(Some(beatmap), tx).await;
+            }
+            Ok((Err(e), _, _)) => {
+                if matches!(e, MemoryError::ProcessNotFound | MemoryError::AccessDenied) {
+                    return Err(e);
+                }
+
+                consecutive_failures += 1;
+                log_debug!(
+                    "memory-lazer",
+                    "Beatmap read failed ({}/{}): {}",
+                    consecutive_failures,
+                    MAX_CONSECUTIVE_READ_FAILURES,
+                    e
+                );
+                if consecutive_failures >= MAX_CONSECUTIVE_READ_FAILURES {
+                    return Err(e);
                 }
             }
-
-            Some(cmd) = cmd_rx.recv() => {
-                match cmd {
-                    OsuCommand::RequestBeatmapData => {
-                        send_current_data(current_beatmap, current_profile, tx, forward_tx).await;
-                    }
-                    OsuCommand::UpdateEventForwardSender(new_sender) => {
-                        *forward_tx = new_sender;
-                    }
-                }
+            Err(e) => {
+                return Err(MemoryError::ReadFailed(format!("Task panic: {}", e)));
             }
         }
     }

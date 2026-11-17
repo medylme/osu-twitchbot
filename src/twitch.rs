@@ -6,12 +6,11 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tokio::sync::mpsc;
 use tokio::time::{self, Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, UserProfile};
+use crate::osu::core::{BeatmapData, UserProfile, current_snapshot};
 use crate::osu::pp::{PpArgs, analyze_map, calculate_score_pp, mods_fit_map};
 use crate::placeholders::Placeholders;
 use crate::{log_debug, log_error, log_info, log_warn};
@@ -418,18 +417,10 @@ impl TwitchClient {
         Ok(())
     }
 
-    pub async fn init_websocket_handler(
-        &self,
-        osu_tx: mpsc::Sender<OsuCommand>,
-        mut osu_rx: mpsc::Receiver<MemoryEvent>,
-    ) -> Result<(), BoxError> {
+    pub async fn init_websocket_handler(&self) -> Result<(), BoxError> {
         log_debug!("twitch", "Starting websocket session handler");
         let keepalive_duration = Duration::from_secs(SOCKET_KEEPALIVE_SECONDS);
         let mut last_message = Instant::now();
-
-        let mut latest_beatmap: Option<BeatmapData> = None;
-        let mut latest_profile: Option<UserProfile> = None;
-        let _ = osu_tx.send(OsuCommand::RequestBeatmapData).await;
 
         let mut last_command_time: Option<Instant> = None;
 
@@ -437,78 +428,57 @@ impl TwitchClient {
             let mut read = self.session.read.lock().await;
             let timeout = time::timeout(keepalive_duration, read.next());
 
-            tokio::select! {
-                result = timeout => {
-                    match result {
-                        Ok(Some(Ok(msg))) => {
-                            log_debug!("twitch", "Received message from server");
-                            last_message = Instant::now();
+            match timeout.await {
+                Ok(Some(Ok(msg))) => {
+                    log_debug!("twitch", "Received message from server");
+                    last_message = Instant::now();
 
-                            match msg {
-                                Message::Text(text) => {
-                                    log_debug!("twitch", "Processing text message");
-                                    drop(read);
-                                    if let Err(e) = self.handle_eventsub_message(
-                                        &text,
-                                        &latest_beatmap,
-                                        &latest_profile,
-                                        &mut last_command_time,
-                                    ).await {
-                                        log_warn!("twitch", "Message error: {}", e);
-                                    }
-                                }
-                                Message::Ping(data) => {
-                                    log_debug!("twitch", "Received ping, sending pong");
-                                    drop(read);
-                                    let mut write = self.session.write.lock().await;
-                                    write.send(Message::Pong(data)).await?;
-                                }
-                                Message::Close(_) => {
-                                    log_info!("twitch", "Connection closed by server");
-                                    drop(read);
-                                    return Ok(());
-                                }
-                                _ => {
-                                    log_debug!("twitch", "Received other message type");
-                                    drop(read);
-                                }
+                    match msg {
+                        Message::Text(text) => {
+                            log_debug!("twitch", "Processing text message");
+                            drop(read);
+                            if let Err(e) = self
+                                .handle_eventsub_message(&text, &mut last_command_time)
+                                .await
+                            {
+                                log_warn!("twitch", "Message error: {}", e);
                             }
                         }
-                        Ok(Some(Err(e))) => {
-                            log_debug!("twitch", "WebSocket error: {}", e);
+                        Message::Ping(data) => {
+                            log_debug!("twitch", "Received ping, sending pong");
                             drop(read);
-                            return Err(format!("WebSocket error: {}", e).into());
+                            let mut write = self.session.write.lock().await;
+                            write.send(Message::Pong(data)).await?;
                         }
-                        Ok(None) => {
-                            log_debug!("twitch", "WebSocket connection closed");
+                        Message::Close(_) => {
+                            log_info!("twitch", "Connection closed by server");
                             drop(read);
-                            return Err("WebSocket connection closed".into());
+                            return Ok(());
                         }
-                        Err(_) => {
-                            log_debug!("twitch", "Timeout waiting for message");
-                            if last_message.elapsed() > keepalive_duration {
-                                log_debug!("twitch", "Keepalive timeout exceeded");
-                                drop(read);
-                                return Err("Keepalive timeout".into());
-                            }
+                        _ => {
+                            log_debug!("twitch", "Received other message type");
                             drop(read);
                         }
                     }
                 }
-
-                Some(osu_event) = osu_rx.recv() => {
+                Ok(Some(Err(e))) => {
+                    log_debug!("twitch", "WebSocket error: {}", e);
                     drop(read);
-
-                    match osu_event {
-                        MemoryEvent::BeatmapDataResponse(beatmap)
-                        | MemoryEvent::BeatmapChanged(beatmap) => {
-                            latest_beatmap = beatmap;
-                        }
-                        MemoryEvent::ProfileChanged(profile) => {
-                            latest_profile = profile;
-                        }
-                        MemoryEvent::StatusChanged(_) => {}
+                    return Err(format!("WebSocket error: {}", e).into());
+                }
+                Ok(None) => {
+                    log_debug!("twitch", "WebSocket connection closed");
+                    drop(read);
+                    return Err("WebSocket connection closed".into());
+                }
+                Err(_) => {
+                    log_debug!("twitch", "Timeout waiting for message");
+                    if last_message.elapsed() > keepalive_duration {
+                        log_debug!("twitch", "Keepalive timeout exceeded");
+                        drop(read);
+                        return Err("Keepalive timeout".into());
                     }
+                    drop(read);
                 }
             }
         }
@@ -575,8 +545,6 @@ impl TwitchClient {
     async fn handle_eventsub_message(
         &self,
         message: &str,
-        latest_beatmap: &Option<BeatmapData>,
-        latest_profile: &Option<UserProfile>,
         last_command_time: &mut Option<Instant>,
     ) -> Result<(), BoxError> {
         let message: EventMessage = serde_json::from_str(message)?;
@@ -621,9 +589,10 @@ impl TwitchClient {
                                 event.chatter_user_name
                             );
 
-                            let reply = match (&cmd_type, latest_beatmap) {
+                            let osu = current_snapshot();
+                            let reply = match (&cmd_type, &osu.beatmap) {
                                 (CommandType::Rank, _) => {
-                                    Self::rank_reply(&settings, latest_profile.as_ref())
+                                    Self::rank_reply(&settings, osu.profile.as_ref())
                                 }
                                 (_, Some(beatmap)) => {
                                     let (settings, beatmap, args) =

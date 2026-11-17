@@ -26,8 +26,8 @@ use gui::core::{Message, State};
 use gui::theme::{ThemeOverride, get_current_theme, set_theme_override};
 use logging::{LogEntry, get_log_channel};
 use osu::core::{
-    BeatmapData, DetectedProcess, MemoryEvent, OsuClient, OsuCommand, OsuStatus, UserProfile,
-    detect_osu_processes, send_current_data,
+    DetectedProcess, MemoryEvent, OsuClient, OsuStatus, detect_osu_processes, publish_beatmap,
+    publish_profile,
 };
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
@@ -208,20 +208,13 @@ fn new_channel<T>(buffer: usize) -> Channel<T> {
     (tx, Arc::new(Mutex::new(Some(rx))))
 }
 
-static OSU_CHANNEL: OnceLock<Channel<OsuCommand>> = OnceLock::new();
 static TWITCH_CHANNEL: OnceLock<Channel<TwitchCommand>> = OnceLock::new();
 
 static OSU_EVENT: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
 static TWITCH_EVENT: OnceLock<Channel<TwitchEvent>> = OnceLock::new();
 
-static OSU_EVENT_FORWARD: OnceLock<Channel<MemoryEvent>> = OnceLock::new();
-
 static TRAY_EVENT: OnceLock<Channel<TrayEvent>> = OnceLock::new();
 static TRAY_STATUS: OnceLock<Channel<TrayStatus>> = OnceLock::new();
-
-fn get_osu_channel() -> &'static Channel<OsuCommand> {
-    OSU_CHANNEL.get_or_init(|| new_channel(10))
-}
 
 fn get_twitch_channel() -> &'static Channel<TwitchCommand> {
     TWITCH_CHANNEL.get_or_init(|| new_channel(10))
@@ -233,10 +226,6 @@ fn get_osu_event() -> &'static Channel<MemoryEvent> {
 
 fn get_twitch_event() -> &'static Channel<TwitchEvent> {
     TWITCH_EVENT.get_or_init(|| new_channel(10))
-}
-
-fn get_osu_event_forward() -> &'static Channel<MemoryEvent> {
-    OSU_EVENT_FORWARD.get_or_init(|| new_channel(10))
 }
 
 fn get_tray_event() -> &'static Channel<TrayEvent> {
@@ -331,16 +320,8 @@ async fn exits_within(pid: u32, grace: Duration) -> bool {
 }
 
 async fn osu_worker() {
-    let cmd_rx = get_osu_channel().1.lock().unwrap().take();
-    let Some(mut cmd_rx) = cmd_rx else {
-        return;
-    };
-
     let mut tx = get_osu_event().0.clone();
-    let mut forward_tx = get_osu_event_forward().0.clone();
 
-    let mut current_beatmap: Option<BeatmapData> = None;
-    let mut current_profile: Option<UserProfile> = None;
     let mut failure_streak: Option<ReaderFailureStreak> = None;
     let mut startup_notice_pid: Option<u32> = None;
 
@@ -350,19 +331,6 @@ async fn osu_worker() {
             .await;
 
         let process: DetectedProcess = loop {
-            while let Ok(cmd) = cmd_rx.try_recv() {
-                match cmd {
-                    OsuCommand::RequestBeatmapData => {
-                        send_current_data(&current_beatmap, &current_profile, &tx, &forward_tx)
-                            .await;
-                    }
-                    OsuCommand::UpdateEventForwardSender(new_sender) => {
-                        forward_tx = new_sender;
-                        log_debug!("osu", "Updated event forward sender");
-                    }
-                }
-            }
-
             let processes = detect_osu_processes();
             if let Some(found) = processes.into_iter().next() {
                 break found;
@@ -373,41 +341,14 @@ async fn osu_worker() {
         let reader_started = time::Instant::now();
 
         let result = match process.client {
-            OsuClient::Lazer => {
-                run_lazer_reader(
-                    process.pid,
-                    process.version,
-                    &mut tx,
-                    &mut cmd_rx,
-                    &mut forward_tx,
-                    &mut current_beatmap,
-                    &mut current_profile,
-                )
-                .await
-            }
+            OsuClient::Lazer => run_lazer_reader(process.pid, process.version, &mut tx).await,
             OsuClient::Stable => {
-                run_stable_reader(
-                    process.pid,
-                    process.songs_folder.clone(),
-                    &mut tx,
-                    &mut cmd_rx,
-                    &mut forward_tx,
-                    &mut current_beatmap,
-                    &mut current_profile,
-                )
-                .await
+                run_stable_reader(process.pid, process.songs_folder.clone(), &mut tx).await
             }
         };
 
-        current_beatmap = None;
-        current_profile = None;
-        for event in [
-            MemoryEvent::BeatmapChanged(None),
-            MemoryEvent::ProfileChanged(None),
-        ] {
-            let _ = tx.send(event.clone()).await;
-            let _ = forward_tx.try_send(event);
-        }
+        publish_beatmap(None, &tx).await;
+        publish_profile(None, &tx).await;
 
         let _ = tx
             .send(MemoryEvent::StatusChanged(OsuStatus::Disconnected))
@@ -501,7 +442,6 @@ async fn twitch_worker() {
     };
 
     let tx = get_twitch_event().0.clone();
-    let osu_tx = get_osu_channel().0.clone();
 
     let mut websocket_handle: Option<tokio::task::JoinHandle<()>> = None;
     let mut current_client: Option<Arc<TwitchClient>> = None;
@@ -525,30 +465,11 @@ async fn twitch_worker() {
 
                         match subscribe_result {
                             Ok(()) => {
-                                let (new_forward_tx, osu_event_rx) =
-                                    mpsc::channel::<MemoryEvent>(10);
-
-                                let osu_tx_for_update = osu_tx.clone();
-                                if let Err(e) = osu_tx_for_update
-                                    .send(OsuCommand::UpdateEventForwardSender(new_forward_tx))
-                                    .await
-                                {
-                                    log_warn!(
-                                        "twitch",
-                                        "Failed to update osu event forward sender: {}",
-                                        e
-                                    );
-                                }
-
-                                let osu_tx_clone = osu_tx.clone();
                                 let tx_clone = tx.clone();
                                 let client_clone = Arc::clone(&client);
 
                                 let ws_handle = tokio::spawn(async move {
-                                    if let Err(e) = client_clone
-                                        .init_websocket_handler(osu_tx_clone, osu_event_rx)
-                                        .await
-                                    {
+                                    if let Err(e) = client_clone.init_websocket_handler().await {
                                         let err_s = e.to_string();
                                         if is_transient_network_error(&err_s) {
                                             log_warn!("twitch", "Websocket handler error: {}", e);

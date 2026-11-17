@@ -6,9 +6,9 @@ use tokio::time::{self, Duration};
 
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
-    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
-    OsuStatus, ProcessMemory, UserProfile, known_ruleset, order_mods, parse_pattern,
-    privilege_hint, publish_profile, send_current_data,
+    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuStatus,
+    ProcessMemory, UserProfile, known_ruleset, order_mods, parse_pattern, privilege_hint,
+    publish_beatmap, publish_profile,
 };
 use crate::{log_debug, log_warn};
 
@@ -19,10 +19,6 @@ pub async fn run_stable_reader(
     pid: u32,
     songs_folder: Option<String>,
     tx: &mut mpsc::Sender<MemoryEvent>,
-    cmd_rx: &mut mpsc::Receiver<OsuCommand>,
-    forward_tx: &mut mpsc::Sender<MemoryEvent>,
-    current_beatmap: &mut Option<BeatmapData>,
-    current_profile: &mut Option<UserProfile>,
 ) -> Result<(), MemoryError> {
     log_debug!(
         "memory-stable",
@@ -89,14 +85,8 @@ pub async fn run_stable_reader(
                 match result {
                     Ok((Ok(beatmap), profile)) => {
                         consecutive_failures = 0;
-                        publish_profile(profile, current_profile, tx, forward_tx).await;
-
-                        if current_beatmap.as_ref() != Some(&beatmap) {
-                            *current_beatmap = Some(beatmap.clone());
-                            let event = MemoryEvent::BeatmapChanged(Some(beatmap));
-                            let _ = tx.send(event.clone()).await;
-                            let _ = forward_tx.try_send(event);
-                        }
+                        publish_profile(profile, tx).await;
+                        publish_beatmap(Some(beatmap), tx).await;
                     }
                     Ok((Err(e), _)) => {
                         if matches!(e, MemoryError::ProcessNotFound | MemoryError::AccessDenied) {
@@ -117,17 +107,6 @@ pub async fn run_stable_reader(
                     }
                     Err(e) => {
                         return Err(MemoryError::ReadFailed(format!("Task panic: {}", e)));
-                    }
-                }
-            }
-
-            Some(cmd) = cmd_rx.recv() => {
-                match cmd {
-                    OsuCommand::RequestBeatmapData => {
-                        send_current_data(current_beatmap, current_profile, tx, forward_tx).await;
-                    }
-                    OsuCommand::UpdateEventForwardSender(new_sender) => {
-                        *forward_tx = new_sender;
                     }
                 }
             }

@@ -19,7 +19,7 @@ use super::components::{
 use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
 use crate::logging::{LogEntry, LogLevel};
-use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus, UserProfile};
+use crate::osu::core::{BeatmapData, MemoryEvent, OsuStatus, UserProfile};
 use crate::osu::pp::{MapAnalysis, MapStats, analyze_map};
 use crate::placeholders::{Placeholders, grouped};
 use crate::preferences::PreferencesStore;
@@ -31,9 +31,8 @@ use crate::twitch::{
     is_invalid_access_token_error, is_transient_network_error,
 };
 use crate::{
-    MAX_WINDOW_SIZE, MIN_WINDOW_SIZE, VERSION, get_osu_channel, get_tray_status_channel,
-    get_twitch_channel, log_debug, log_error, log_info, log_warn, main_window_settings,
-    tray_active,
+    MAX_WINDOW_SIZE, MIN_WINDOW_SIZE, VERSION, get_tray_status_channel, get_twitch_channel,
+    log_debug, log_error, log_info, log_warn, main_window_settings, tray_active,
 };
 
 pub type CommandReceiver<T> = Arc<Mutex<Option<mpsc::Receiver<T>>>>;
@@ -106,8 +105,6 @@ pub struct State {
     placeholder_copied: bool,
     placeholder_copies: u64,
     osu_status: OsuStatus,
-    osu_cmd_tx: mpsc::Sender<OsuCommand>,
-    pub osu_cmd_rx: CommandReceiver<OsuCommand>,
     twitch_status: TwitchStatus,
     twitch_cmd_tx: mpsc::Sender<TwitchCommand>,
     pub twitch_cmd_rx: CommandReceiver<TwitchCommand>,
@@ -119,10 +116,6 @@ pub struct State {
 
 impl State {
     pub fn new() -> Self {
-        let (osu_cmd_tx, osu_cmd_rx) = {
-            let (tx, rx) = get_osu_channel();
-            (tx.clone(), Arc::clone(rx))
-        };
         let (twitch_cmd_tx, twitch_cmd_rx) = {
             let (tx, rx) = get_twitch_channel();
             (tx.clone(), Arc::clone(rx))
@@ -170,8 +163,6 @@ impl State {
             placeholder_copied: false,
             placeholder_copies: 0,
             osu_status: OsuStatus::default(),
-            osu_cmd_tx,
-            osu_cmd_rx,
             twitch_status,
             twitch_cmd_tx,
             twitch_cmd_rx,
@@ -1224,7 +1215,6 @@ impl State {
                     self.current_beatmap = beatmap;
                     return self.analyze_current_map();
                 }
-                MemoryEvent::BeatmapDataResponse(_) => {}
                 MemoryEvent::ProfileChanged(profile) => {
                     self.profile = profile;
                 }

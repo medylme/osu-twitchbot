@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::io;
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
 use serde::Deserialize;
@@ -11,17 +12,11 @@ use crate::log_debug;
 pub const DATA_POLLING_INTERVAL_MS: u64 = 100;
 pub const MAX_CONSECUTIVE_READ_FAILURES: u32 = 10;
 
-#[derive(Debug)]
-pub enum OsuCommand {
-    RequestBeatmapData,
-    UpdateEventForwardSender(mpsc::Sender<MemoryEvent>),
-}
-
 #[derive(Debug, Clone)]
+#[allow(clippy::enum_variant_names)]
 pub enum MemoryEvent {
     StatusChanged(OsuStatus),
     BeatmapChanged(Option<BeatmapData>),
-    BeatmapDataResponse(Option<BeatmapData>),
     ProfileChanged(Option<UserProfile>),
 }
 
@@ -139,35 +134,48 @@ pub fn decimal_to_f64(flags: u32, hi: u32, lo: u64) -> f64 {
     }
 }
 
-pub async fn send_current_data(
-    beatmap: &Option<BeatmapData>,
-    profile: &Option<UserProfile>,
-    tx: &mpsc::Sender<MemoryEvent>,
-    forward_tx: &mpsc::Sender<MemoryEvent>,
-) {
-    for event in [
-        MemoryEvent::BeatmapDataResponse(beatmap.clone()),
-        MemoryEvent::ProfileChanged(profile.clone()),
-    ] {
-        let _ = tx.send(event.clone()).await;
-        let _ = forward_tx.try_send(event);
-    }
+#[derive(Debug, Clone, Default)]
+pub struct OsuSnapshot {
+    pub beatmap: Option<BeatmapData>,
+    pub profile: Option<UserProfile>,
 }
 
-pub async fn publish_profile(
-    profile: Option<UserProfile>,
-    current: &mut Option<UserProfile>,
-    tx: &mpsc::Sender<MemoryEvent>,
-    forward_tx: &mpsc::Sender<MemoryEvent>,
-) {
-    if *current == profile {
-        return;
+// what the game shows right now, events only tell the gui that it changed
+static SNAPSHOT: Mutex<OsuSnapshot> = Mutex::new(OsuSnapshot {
+    beatmap: None,
+    profile: None,
+});
+
+fn snapshot() -> MutexGuard<'static, OsuSnapshot> {
+    SNAPSHOT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn current_snapshot() -> OsuSnapshot {
+    snapshot().clone()
+}
+
+pub async fn publish_beatmap(beatmap: Option<BeatmapData>, tx: &mpsc::Sender<MemoryEvent>) {
+    {
+        let mut snapshot = snapshot();
+        if snapshot.beatmap == beatmap {
+            return;
+        }
+        snapshot.beatmap.clone_from(&beatmap);
     }
 
-    current.clone_from(&profile);
-    let event = MemoryEvent::ProfileChanged(profile);
-    let _ = tx.send(event.clone()).await;
-    let _ = forward_tx.try_send(event);
+    let _ = tx.send(MemoryEvent::BeatmapChanged(beatmap)).await;
+}
+
+pub async fn publish_profile(profile: Option<UserProfile>, tx: &mpsc::Sender<MemoryEvent>) {
+    {
+        let mut snapshot = snapshot();
+        if snapshot.profile == profile {
+            return;
+        }
+        snapshot.profile.clone_from(&profile);
+    }
+
+    let _ = tx.send(MemoryEvent::ProfileChanged(profile)).await;
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -896,6 +904,32 @@ pub fn parse_pattern(pattern_str: &str) -> (Vec<u8>, Vec<bool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn publishing_updates_the_snapshot_and_reports_a_change_once() {
+        let (tx, mut rx) = mpsc::channel(10);
+        let profile = Some(UserProfile {
+            username: "Player".to_string(),
+            rank: 1,
+            pp: 0.0,
+            accuracy: 0.0,
+            play_count: 0,
+            level: 1,
+        });
+
+        publish_profile(profile.clone(), &tx).await;
+        publish_profile(profile.clone(), &tx).await;
+
+        assert_eq!(current_snapshot().profile, profile);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(MemoryEvent::ProfileChanged(Some(_)))
+        ));
+        assert!(rx.try_recv().is_err());
+
+        publish_profile(None, &tx).await;
+        assert_eq!(current_snapshot().profile, None);
+    }
 
     fn mod_info(acronym: &str, settings: Option<serde_json::Value>) -> ModInfo {
         ModInfo {
