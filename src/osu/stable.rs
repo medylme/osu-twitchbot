@@ -191,7 +191,7 @@ fn scan_pattern(
     process: &ProcessMemory,
     name: &str,
     pattern_str: &str,
-) -> Result<usize, MemoryError> {
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
     log_debug!("memory-stable", "Scanning for {} pattern...", name);
     let (pattern, mask) = parse_pattern(pattern_str);
 
@@ -203,10 +203,14 @@ fn scan_pattern(
         }
         Err(e) => {
             log_debug!("memory-stable", "Failed to find {} pattern: {}", name, e);
-            if matches!(e, MemoryError::AccessDenied) {
-                log_warn!("memory-stable", "{}", privilege_hint());
+            match e {
+                MemoryError::PatternNotFound => Err(format!("{name} pattern not found").into()),
+                MemoryError::AccessDenied => {
+                    log_warn!("memory-stable", "{}", privilege_hint());
+                    Err(Box::new(e))
+                }
+                _ => Err(Box::new(e)),
             }
-            Err(e)
         }
     }
 }

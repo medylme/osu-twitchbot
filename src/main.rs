@@ -384,7 +384,7 @@ async fn osu_worker() {
                         log_warn!("osu", "{}", osu::core::privilege_hint());
                     }
 
-                    let message = format!("{:#?}", e);
+                    let message = e.to_string();
                     let established = session_secs >= ESTABLISHED_SESSION_SECS;
 
                     match &mut failure_streak {
@@ -395,9 +395,9 @@ async fn osu_worker() {
                             {
                                 log_error!(
                                     "osu",
-                                    "Memory reader failing persistently ({} consecutive attempts, pid {}): {:#?}",
+                                    "{:?} reader failing persistently ({} consecutive attempts): {}",
+                                    process.client,
                                     streak.count,
-                                    process.pid,
                                     e
                                 );
                                 streak.reported = true;
@@ -412,9 +412,9 @@ async fn osu_worker() {
                         }
                         _ => {
                             if established {
-                                log_error!("osu", "Memory reader error: {:#?}", e);
+                                log_error!("osu", "{:?} reader error: {}", process.client, e);
                             } else {
-                                log_warn!("osu", "Memory reader error: {:#?}", e);
+                                log_warn!("osu", "{:?} reader error: {}", process.client, e);
                             }
                             failure_streak = Some(ReaderFailureStreak {
                                 pid: process.pid,
