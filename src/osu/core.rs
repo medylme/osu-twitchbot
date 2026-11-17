@@ -113,6 +113,40 @@ impl Display for BeatmapStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GameState {
+    #[default]
+    Idle,
+    SongSelect,
+    Playing,
+    Results,
+    Editing,
+}
+
+impl GameState {
+    pub fn from_stable_status(status: u32) -> Self {
+        match status {
+            1 => GameState::Editing,
+            2 => GameState::Playing,
+            4 | 5 | 13 => GameState::SongSelect,
+            7 | 14 | 17 | 18 => GameState::Results,
+            _ => GameState::Idle,
+        }
+    }
+}
+
+impl Display for GameState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GameState::Idle => write!(f, "Idle"),
+            GameState::SongSelect => write!(f, "Song select"),
+            GameState::Playing => write!(f, "Playing"),
+            GameState::Results => write!(f, "Results"),
+            GameState::Editing => write!(f, "Editing"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
 pub struct ModInfo {
     pub acronym: String,
@@ -129,6 +163,7 @@ pub struct GameplayMods {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeatmapData {
     pub client: OsuClient,
+    pub state: GameState,
     pub id: i32,
     pub artist: String,
     pub title: String,
@@ -827,9 +862,34 @@ mod tests {
         assert_eq!(order_mods(&mut mods), "DA");
     }
 
+    #[test]
+    fn stable_status_maps_to_a_state() {
+        assert_eq!(GameState::from_stable_status(0), GameState::Idle);
+        assert_eq!(GameState::from_stable_status(1), GameState::Editing);
+        assert_eq!(GameState::from_stable_status(2), GameState::Playing);
+        assert_eq!(GameState::from_stable_status(4), GameState::SongSelect);
+        assert_eq!(GameState::from_stable_status(5), GameState::SongSelect);
+        assert_eq!(GameState::from_stable_status(7), GameState::Results);
+        assert_eq!(GameState::from_stable_status(11), GameState::Idle);
+    }
+
+    #[test]
+    fn a_state_change_changes_the_beatmap() {
+        let dir = std::env::temp_dir();
+        let selecting = beatmap_at(&dir, "missing.osu");
+        let playing = BeatmapData {
+            state: GameState::Playing,
+            ..selecting.clone()
+        };
+
+        assert_ne!(selecting, playing);
+        assert_eq!(playing.state.to_string(), "Playing");
+    }
+
     fn beatmap_at(songs_folder: &Path, file: &str) -> BeatmapData {
         let mut beatmap = BeatmapData {
             client: OsuClient::Stable,
+            state: GameState::Idle,
             id: 0,
             artist: "artist".to_string(),
             title: "title".to_string(),

@@ -44,6 +44,7 @@ Closing the window minimizes the app to the system tray so the bot keeps running
 | `{mods}`    | Mods            |
 | `{link}`    | Beatmap link    |
 | `{status}`  | Beatmap status  |
+| `{state}`   | `Playing`, `Editing`, `Song select`, `Results` or `Idle` |
 
 Map stats, adjusted for the selected mods (e.g. DT raises `{stars}`, `{bpm}`, `{ar}` and `{od}` and shortens `{length}`):
 

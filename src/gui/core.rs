@@ -501,7 +501,7 @@ impl State {
             Message::NpFormatChanged,
             Message::ResetNpFormat,
             concat!(
-                "Placeholders: {artist} {title} {diff} {creator} {mods} {status} {link} ",
+                "Placeholders: {artist} {title} {diff} {creator} {mods} {status} {link} {state} ",
                 "{stars} {bpm} {length} {cs} {ar} {od} {hp} {max_combo} {objects}",
             ),
             self.build_np_format_preview(p),
@@ -653,6 +653,11 @@ impl State {
             ]
             .spacing(10),
             row![field("Mods"), copyable_value(mods_text, "{mods}")].spacing(10),
+            row![
+                field("State"),
+                copyable_value(beatmap.state.to_string(), "{state}")
+            ]
+            .spacing(10),
             row![field("Beatmap"), copyable_value(link, "{link}")].spacing(10),
         ]
         .spacing(6);

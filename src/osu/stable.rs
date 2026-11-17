@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
 use super::core::{
-    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods,
+    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
     OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint,
 };
@@ -332,6 +332,7 @@ impl StableReader {
     pub fn read_beatmap(&mut self) -> Result<BeatmapData, MemoryError> {
         let unknown_data = BeatmapData {
             client: OsuClient::Stable,
+            state: GameState::Idle,
             id: 0,
             artist: "?".to_string(),
             title: "?".to_string(),
@@ -427,9 +428,14 @@ impl StableReader {
         };
 
         let mods = self.read_mods();
+        let state = self
+            .read_status()
+            .map(GameState::from_stable_status)
+            .unwrap_or_default();
 
         Ok(BeatmapData {
             client: OsuClient::Stable,
+            state,
             id,
             artist,
             title,

@@ -13,7 +13,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1576
+      "screen_stack": 1576,
+      "osu_logo": 1616
     },
     "screen_stack": {
       "stack": 800
@@ -23,7 +24,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1232
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -61,6 +64,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7937116340224
   },
@@ -78,7 +91,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1568
+      "screen_stack": 1568,
+      "osu_logo": 1608
     },
     "screen_stack": {
       "stack": 800
@@ -88,7 +102,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1224
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -126,6 +142,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7902756601856
   },
@@ -143,7 +169,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1568
+      "screen_stack": 1568,
+      "osu_logo": 1608
     },
     "screen_stack": {
       "stack": 800
@@ -153,7 +180,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1224
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -191,6 +220,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7902756601856
   },
@@ -208,7 +247,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1568
+      "screen_stack": 1568,
+      "osu_logo": 1608
     },
     "screen_stack": {
       "stack": 800
@@ -218,7 +258,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1224
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -256,6 +298,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7902756601856
   },
@@ -273,7 +325,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1552
+      "screen_stack": 1552,
+      "osu_logo": 1592
     },
     "screen_stack": {
       "stack": 800
@@ -283,7 +336,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -321,6 +376,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7834037125120
   },
@@ -338,7 +403,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1552
+      "screen_stack": 1552,
+      "osu_logo": 1592
     },
     "screen_stack": {
       "stack": 800
@@ -348,7 +414,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -386,6 +454,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7834037125120
   },
@@ -403,7 +481,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1544
+      "screen_stack": 1544,
+      "osu_logo": 1584
     },
     "screen_stack": {
       "stack": 800
@@ -413,7 +492,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -451,6 +532,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7799677386752
   },
@@ -468,7 +559,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1544
+      "screen_stack": 1544,
+      "osu_logo": 1584
     },
     "screen_stack": {
       "stack": 800
@@ -478,7 +570,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -516,6 +610,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7765317648384
   },
@@ -533,7 +637,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1544
+      "screen_stack": 1544,
+      "osu_logo": 1584
     },
     "screen_stack": {
       "stack": 800
@@ -543,7 +648,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -581,6 +688,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     },
     "game_base_vtable": 7765317648384
   },
@@ -598,7 +715,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1536
+      "screen_stack": 1536,
+      "osu_logo": 1576
     },
     "screen_stack": {
       "stack": 800
@@ -608,7 +726,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -647,6 +767,16 @@
     "wrapped_storage": {
       "underlying_storage": 16
     },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
+    },
     "game_base_vtable": 7730957910016
   },
   "2026.305.0": {
@@ -663,7 +793,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1528
+      "screen_stack": 1528,
+      "osu_logo": 1568
     },
     "screen_stack": {
       "stack": 800
@@ -673,7 +804,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -711,6 +844,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     }
   },
   "2026.119.0": {
@@ -727,7 +870,8 @@
       "game": 784
     },
     "osu_game": {
-      "screen_stack": 1528
+      "screen_stack": 1528,
+      "osu_logo": 1568
     },
     "screen_stack": {
       "stack": 800
@@ -737,7 +881,9 @@
       "ruleset": 1112,
       "storage": 1088,
       "selected_mods": 1120,
-      "available_mods": 1128
+      "available_mods": 1128,
+      "api": 1080,
+      "realm": 1216
     },
     "submitting_player": {
       "beatmap": 1264,
@@ -775,6 +921,16 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "editor": {
+      "api": 1096,
+      "realm": 960
+    },
+    "results_screen": {
+      "api": 1040
+    },
+    "osu_screen": {
+      "logo": 896
     }
   }
 }

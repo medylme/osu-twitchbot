@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 
 use super::core::{
-    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods,
+    BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
     OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint, rate_mod_default,
 };
@@ -186,6 +186,12 @@ struct Offsets {
     #[serde(default)]
     song_select: SongSelect,
     #[serde(default)]
+    editor: EditorOffsets,
+    #[serde(default)]
+    results_screen: ResultsScreenOffsets,
+    #[serde(default)]
+    osu_screen: OsuScreenOffsets,
+    #[serde(default)]
     game_base_vtable: Option<usize>,
 }
 
@@ -212,6 +218,8 @@ struct ApiAccess {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct OsuGame {
     screen_stack: usize,
+    #[serde(default)]
+    osu_logo: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -230,12 +238,32 @@ struct OsuGameBase {
     selected_mods: usize,
     #[serde(default)]
     available_mods: usize,
+    #[serde(default)]
+    api: usize,
+    #[serde(default)]
+    realm: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 struct SubmittingPlayer {
     beatmap: usize,
     ruleset: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct EditorOffsets {
+    api: usize,
+    realm: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct ResultsScreenOffsets {
+    api: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct OsuScreenOffsets {
+    logo: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -577,36 +605,96 @@ impl LazerReader {
         screen_ref != 0 && screen_ref == self.game_base
     }
 
-    fn has_song_select_in_stack(&self) -> bool {
-        let screen_stack = self
-            .process
-            .read_ptr(self.game_base + self.offsets.osu_game.screen_stack)
-            .unwrap_or(0);
+    // bottom of the stack first
+    fn screens(&self) -> Vec<usize> {
+        let read = |addr: usize| self.process.read_ptr(addr).unwrap_or(0);
+
+        let screen_stack = read(self.game_base + self.offsets.osu_game.screen_stack);
         if screen_stack == 0 {
-            return false;
+            return Vec::new();
         }
 
-        let stack = self
-            .process
-            .read_ptr(screen_stack + self.offsets.screen_stack.stack)
-            .unwrap_or(0);
+        let stack = read(screen_stack + self.offsets.screen_stack.stack);
         if stack == 0 {
-            return false;
+            return Vec::new();
         }
 
         let count = self.process.read_i32(stack + 0x10).unwrap_or(0);
-        let items = self.process.read_ptr(stack + 0x8).unwrap_or(0);
+        let items = read(stack + 0x8);
         if count <= 0 || items == 0 {
+            return Vec::new();
+        }
+
+        (0..count as usize)
+            .map(|i| read(items + 0x10 + 0x8 * i))
+            .filter(|screen| *screen != 0)
+            .collect()
+    }
+
+    fn has_song_select_in_stack(&self) -> bool {
+        self.screens()
+            .into_iter()
+            .any(|screen| self.is_song_select_screen(screen))
+    }
+
+    // true when the screen's field holds the same object as the game's field
+    fn screen_shares(&self, screen: usize, screen_offset: usize, game_offset: usize) -> bool {
+        if screen_offset == 0 || game_offset == 0 {
             return false;
         }
 
-        for i in 0..count as usize {
-            let screen = self.process.read_ptr(items + 0x10 + 0x8 * i).unwrap_or(0);
-            if screen != 0 && self.is_song_select_screen(screen) {
-                return true;
-            }
+        let on_screen = self.process.read_ptr(screen + screen_offset).unwrap_or(0);
+        let on_game = self
+            .process
+            .read_ptr(self.game_base + game_offset)
+            .unwrap_or(0);
+
+        on_screen != 0 && on_screen == on_game
+    }
+
+    fn is_editor_screen(&self, screen: usize) -> bool {
+        let editor = &self.offsets.editor;
+        let gb = &self.offsets.osu_game_base;
+
+        self.screen_shares(screen, editor.api, gb.api)
+            && self.screen_shares(screen, editor.realm, gb.realm)
+    }
+
+    fn is_results_screen(&self, screen: usize) -> bool {
+        self.screen_shares(
+            screen,
+            self.offsets.results_screen.api,
+            self.offsets.osu_game_base.api,
+        ) && self.screen_shares(
+            screen,
+            self.offsets.osu_screen.logo,
+            self.offsets.osu_game.osu_logo,
+        )
+    }
+
+    fn has_editor_in_stack(&self) -> bool {
+        self.screens()
+            .into_iter()
+            .any(|screen| self.is_editor_screen(screen))
+    }
+
+    fn read_state(&self) -> GameState {
+        let Some(screen) = self.get_current_screen() else {
+            return GameState::Idle;
+        };
+
+        if self.is_player_screen(screen) {
+            GameState::Playing
+        // a test play keeps the editor underneath
+        } else if self.has_editor_in_stack() {
+            GameState::Editing
+        } else if self.is_results_screen(screen) {
+            GameState::Results
+        } else if self.is_song_select_screen(screen) {
+            GameState::SongSelect
+        } else {
+            GameState::Idle
         }
-        false
     }
 
     fn read_mods_for_screen(&mut self) -> Option<GameplayMods> {
@@ -619,7 +707,7 @@ impl LazerReader {
             return Some(mods);
         }
 
-        if self.has_song_select_in_stack() {
+        if self.has_song_select_in_stack() && !self.has_editor_in_stack() {
             return self.read_selected_mods();
         }
 
@@ -697,6 +785,7 @@ impl LazerReader {
     pub fn read_beatmap(&mut self) -> Result<BeatmapData, MemoryError> {
         let unknown_data = BeatmapData {
             client: OsuClient::Lazer,
+            state: GameState::Idle,
             id: 0,
             artist: "?".to_string(),
             title: "?".to_string(),
@@ -842,6 +931,7 @@ impl LazerReader {
 
         Ok(BeatmapData {
             client: OsuClient::Lazer,
+            state: self.read_state(),
             id,
             artist,
             title,
@@ -1096,4 +1186,29 @@ fn read_csharp_string(process: &ProcessMemory, addr: usize) -> Result<String, Me
     }
 
     String::from_utf16(&buffer).map_err(|_| MemoryError::InvalidString)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_version_has_the_state_offsets() {
+        let offsets: HashMap<String, Offsets> =
+            serde_json::from_str(include_str!("../../offsets/lazer.json")).unwrap();
+
+        for (version, o) in &offsets {
+            let state_offsets = [
+                o.osu_game.osu_logo,
+                o.osu_game_base.api,
+                o.osu_game_base.realm,
+                o.editor.api,
+                o.editor.realm,
+                o.results_screen.api,
+                o.osu_screen.logo,
+            ];
+
+            assert!(state_offsets.iter().all(|offset| *offset != 0), "{version}");
+        }
+    }
 }

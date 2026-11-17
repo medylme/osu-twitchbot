@@ -883,7 +883,7 @@ async fn get_user_id_from_access_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::osu::core::{BeatmapStatus, GameplayMods, ModInfo, OsuClient};
+    use crate::osu::core::{BeatmapStatus, GameState, GameplayMods, ModInfo, OsuClient};
 
     const MAP: &str = "osu file format v14
 
@@ -916,6 +916,7 @@ SliderTickRate:1
 
         let beatmap = BeatmapData {
             client: OsuClient::Lazer,
+            state: GameState::Playing,
             id: 0,
             artist: "artist".to_string(),
             title: "title".to_string(),

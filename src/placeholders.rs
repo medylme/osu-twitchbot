@@ -25,6 +25,7 @@ pub struct Placeholders {
     pub status: Option<String>,
     pub link: Option<String>,
     pub mods: Option<String>,
+    pub state: Option<String>,
 
     pub stars: Option<String>,
     pub bpm: Option<String>,
@@ -71,6 +72,7 @@ impl Placeholders {
             status: Some(beatmap.status.to_string()),
             link: Some(link),
             mods: Some(mods),
+            state: Some(beatmap.state.to_string()),
             ..Default::default()
         }
     }
@@ -137,6 +139,7 @@ impl Placeholders {
             status: Some("Ranked".to_string()),
             link: Some("https://osu.ppy.sh/b/123456".to_string()),
             mods: Some("+NoMod".to_string()),
+            state: Some("Playing".to_string()),
             ..Default::default()
         }
         .with_stats(Some(&Self::sample_stats()))
@@ -215,6 +218,7 @@ impl Placeholders {
         Self::replace(&mut result, "{status}", &self.status);
         Self::replace(&mut result, "{link}", &self.link);
         Self::replace(&mut result, "{mods}", &self.mods);
+        Self::replace(&mut result, "{state}", &self.state);
         self.replace_stats(&mut result);
         Self::trim(result)
     }
