@@ -8,7 +8,8 @@ use tokio::time::{self, Duration};
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
-    OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint, rate_mod_default,
+    OsuStatus, ProcessMemory, known_ruleset, order_mods, parse_pattern, privilege_hint,
+    rate_mod_default,
 };
 use crate::{log_debug, log_info, log_warn};
 
@@ -186,6 +187,8 @@ struct Offsets {
     #[serde(default)]
     song_select: SongSelect,
     #[serde(default)]
+    ruleset_info: RulesetInfoOffsets,
+    #[serde(default)]
     editor: EditorOffsets,
     #[serde(default)]
     results_screen: ResultsScreenOffsets,
@@ -248,6 +251,11 @@ struct OsuGameBase {
 struct SubmittingPlayer {
     beatmap: usize,
     ruleset: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct RulesetInfoOffsets {
+    online_id: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -678,6 +686,26 @@ impl LazerReader {
             .any(|screen| self.is_editor_screen(screen))
     }
 
+    fn read_ruleset(&self) -> Option<u8> {
+        let ruleset = self.offsets.osu_game_base.ruleset;
+        let online_id = self.offsets.ruleset_info.online_id;
+        if ruleset == 0 || online_id == 0 {
+            return None;
+        }
+
+        let bindable = self.process.read_ptr(self.game_base + ruleset).ok()?;
+        if bindable == 0 {
+            return None;
+        }
+
+        let ruleset_info = self.process.read_ptr(bindable + 0x20).ok()?;
+        if ruleset_info == 0 {
+            return None;
+        }
+
+        known_ruleset(self.process.read_i32(ruleset_info + online_id).ok()?)
+    }
+
     fn read_state(&self) -> GameState {
         let Some(screen) = self.get_current_screen() else {
             return GameState::Idle;
@@ -786,6 +814,7 @@ impl LazerReader {
         let unknown_data = BeatmapData {
             client: OsuClient::Lazer,
             state: GameState::Idle,
+            ruleset: None,
             id: 0,
             artist: "?".to_string(),
             title: "?".to_string(),
@@ -932,6 +961,7 @@ impl LazerReader {
         Ok(BeatmapData {
             client: OsuClient::Lazer,
             state: self.read_state(),
+            ruleset: self.read_ruleset(),
             id,
             artist,
             title,
@@ -1191,6 +1221,17 @@ fn read_csharp_string(process: &ProcessMemory, addr: usize) -> Result<String, Me
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_version_has_the_ruleset_offsets() {
+        let offsets: HashMap<String, Offsets> =
+            serde_json::from_str(include_str!("../../offsets/lazer.json")).unwrap();
+
+        for (version, o) in &offsets {
+            assert_ne!(o.osu_game_base.ruleset, 0, "{version}");
+            assert_ne!(o.ruleset_info.online_id, 0, "{version}");
+        }
+    }
 
     #[test]
     fn every_version_has_the_state_offsets() {

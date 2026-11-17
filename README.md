@@ -46,7 +46,7 @@ Closing the window minimizes the app to the system tray so the bot keeps running
 | `{status}`  | Beatmap status  |
 | `{state}`   | `Playing`, `Editing`, `Song select`, `Results` or `Idle` |
 
-Map stats, adjusted for the selected mods (e.g. DT raises `{stars}`, `{bpm}`, `{ar}` and `{od}` and shortens `{length}`):
+Map stats, adjusted for the selected mods (e.g. DT raises `{stars}`, `{bpm}`, `{ar}` and `{od}` and shortens `{length}`). osu! maps played in another mode are rated as that mode's convert:
 
 | Placeholder   | Description                  |
 | ------------- | ---------------------------- |

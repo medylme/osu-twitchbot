@@ -3,6 +3,7 @@ use std::path::Path;
 use rosu_mods::serde::GameModSeed;
 use rosu_mods::{Acronym, GameMod, GameModIntermode, GameMode, GameMods};
 use rosu_pp::model::hit_object::HitObjectKind;
+use rosu_pp::model::mode::GameMode as MapMode;
 use rosu_pp::{Beatmap, Difficulty, Performance};
 use serde::de::DeserializeSeed;
 use thiserror::Error;
@@ -374,9 +375,36 @@ fn score_pp(
     }
 }
 
+// std can be converted to other rulesets
+fn convert_to_ruleset(beatmap: &mut Beatmap, ruleset: Option<u8>, mods: &Option<GameplayMods>) {
+    let (map_mode, mode) = match ruleset {
+        Some(1) => (MapMode::Taiko, GameMode::Taiko),
+        Some(2) => (MapMode::Catch, GameMode::Catch),
+        Some(3) => (MapMode::Mania, GameMode::Mania),
+        _ => return,
+    };
+
+    if beatmap.mode != MapMode::Osu {
+        return;
+    }
+
+    let mods = build_mods(mods, mode);
+    if let Err(e) = beatmap.convert_mut(map_mode, &mods.into()) {
+        log_warn!(
+            "osu",
+            "Failed to convert beatmap to ruleset {:?}: {}",
+            ruleset,
+            e
+        );
+    }
+}
+
 fn parse_beatmap(data: &BeatmapData) -> Result<Beatmap, PpError> {
     let osu_file = load_beatmap(data.osu_file_path.as_deref(), data.songs_folder.as_deref())?;
-    Beatmap::from_bytes(&osu_file).map_err(|e| PpError::Parse(e.to_string()))
+    let mut beatmap = Beatmap::from_bytes(&osu_file).map_err(|e| PpError::Parse(e.to_string()))?;
+    convert_to_ruleset(&mut beatmap, data.ruleset, &data.mods);
+
+    Ok(beatmap)
 }
 
 pub fn calculate_score_pp(data: &BeatmapData, args: &PpArgs) -> Result<ScorePp, PpError> {
@@ -603,6 +631,37 @@ SliderTickRate:1
             );
 
         Beatmap::from_bytes(map.as_bytes()).unwrap()
+    }
+
+    fn converted(map: &str, ruleset: Option<u8>) -> Beatmap {
+        let mut beatmap = Beatmap::from_bytes(map.as_bytes()).unwrap();
+        convert_to_ruleset(&mut beatmap, ruleset, &None);
+        beatmap
+    }
+
+    #[test]
+    fn standard_maps_convert_to_the_selected_ruleset() {
+        assert_eq!(converted(TEST_MAP, None).mode, MapMode::Osu);
+        assert_eq!(converted(TEST_MAP, Some(0)).mode, MapMode::Osu);
+        assert_eq!(converted(TEST_MAP, Some(1)).mode, MapMode::Taiko);
+        assert_eq!(converted(TEST_MAP, Some(2)).mode, MapMode::Catch);
+        assert_eq!(converted(TEST_MAP, Some(3)).mode, MapMode::Mania);
+    }
+
+    #[test]
+    fn converts_are_rated_in_their_ruleset() {
+        let standard = analyze(&converted(TEST_MAP, None), &None, OsuClient::Lazer);
+        let taiko = analyze(&converted(TEST_MAP, Some(1)), &None, OsuClient::Lazer);
+
+        assert_ne!(standard.stats.stars, taiko.stats.stars);
+        assert_ne!(standard.pp.pp_100, taiko.pp.pp_100);
+    }
+
+    #[test]
+    fn maps_made_for_a_ruleset_are_not_converted() {
+        let taiko_map = TEST_MAP.replace("Mode: 0", "Mode: 1");
+
+        assert_eq!(converted(&taiko_map, Some(3)).mode, MapMode::Taiko);
     }
 
     #[test]

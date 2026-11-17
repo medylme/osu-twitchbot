@@ -917,6 +917,7 @@ SliderTickRate:1
         let beatmap = BeatmapData {
             client: OsuClient::Lazer,
             state: GameState::Playing,
+            ruleset: None,
             id: 0,
             artist: "artist".to_string(),
             title: "title".to_string(),

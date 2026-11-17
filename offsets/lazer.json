@@ -65,6 +65,9 @@
     "wrapped_storage": {
       "underlying_storage": 16
     },
+    "ruleset_info": {
+      "online_id": 48
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -142,6 +145,9 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "ruleset_info": {
+      "online_id": 48
     },
     "editor": {
       "api": 1096,
@@ -221,6 +227,9 @@
     "wrapped_storage": {
       "underlying_storage": 16
     },
+    "ruleset_info": {
+      "online_id": 48
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -298,6 +307,9 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "ruleset_info": {
+      "online_id": 48
     },
     "editor": {
       "api": 1096,
@@ -377,6 +389,9 @@
     "wrapped_storage": {
       "underlying_storage": 16
     },
+    "ruleset_info": {
+      "online_id": 48
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -454,6 +469,9 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "ruleset_info": {
+      "online_id": 48
     },
     "editor": {
       "api": 1096,
@@ -533,6 +551,9 @@
     "wrapped_storage": {
       "underlying_storage": 16
     },
+    "ruleset_info": {
+      "online_id": 48
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -610,6 +631,9 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "ruleset_info": {
+      "online_id": 48
     },
     "editor": {
       "api": 1096,
@@ -689,6 +713,9 @@
     "wrapped_storage": {
       "underlying_storage": 16
     },
+    "ruleset_info": {
+      "online_id": 48
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -766,6 +793,9 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "ruleset_info": {
+      "online_id": 48
     },
     "editor": {
       "api": 1096,
@@ -845,6 +875,9 @@
     "wrapped_storage": {
       "underlying_storage": 16
     },
+    "ruleset_info": {
+      "online_id": 48
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -921,6 +954,9 @@
     },
     "wrapped_storage": {
       "underlying_storage": 16
+    },
+    "ruleset_info": {
+      "online_id": 48
     },
     "editor": {
       "api": 1096,

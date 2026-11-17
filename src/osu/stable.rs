@@ -7,7 +7,7 @@ use tokio::time::{self, Duration};
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
-    OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint,
+    OsuStatus, ProcessMemory, known_ruleset, order_mods, parse_pattern, privilege_hint,
 };
 use crate::{log_debug, log_warn};
 
@@ -144,6 +144,8 @@ struct MenuModsOffsets {
 #[derive(Debug, Deserialize, Clone)]
 struct BaseOffsets {
     beatmap_ptr: isize,
+    #[serde(default)]
+    ruleset_ptr: isize,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -251,6 +253,23 @@ impl StableReader {
         self.process.read_i32(status_ptr).ok().map(|v| v as u32)
     }
 
+    fn read_ruleset(&self) -> Option<u8> {
+        let offset = self.offsets.base.ruleset_ptr;
+        if offset == 0 {
+            return None;
+        }
+
+        let ruleset_ptr = self
+            .process
+            .read_ptr32((self.base_addr as isize + offset) as usize)
+            .ok()?;
+        if ruleset_ptr == 0 {
+            return None;
+        }
+
+        known_ruleset(self.process.read_i32(ruleset_ptr).ok()?)
+    }
+
     fn read_menu_mods(&self) -> Option<GameplayMods> {
         let mods_ptr = self
             .process
@@ -333,6 +352,7 @@ impl StableReader {
         let unknown_data = BeatmapData {
             client: OsuClient::Stable,
             state: GameState::Idle,
+            ruleset: None,
             id: 0,
             artist: "?".to_string(),
             title: "?".to_string(),
@@ -436,6 +456,7 @@ impl StableReader {
         Ok(BeatmapData {
             client: OsuClient::Stable,
             state,
+            ruleset: self.read_ruleset(),
             id,
             artist,
             title,

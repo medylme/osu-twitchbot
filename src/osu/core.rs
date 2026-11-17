@@ -135,6 +135,11 @@ impl GameState {
     }
 }
 
+// ignore rulesets outside official ones
+pub fn known_ruleset(id: i32) -> Option<u8> {
+    u8::try_from(id).ok().filter(|id| *id <= 3)
+}
+
 impl Display for GameState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -164,6 +169,7 @@ pub struct GameplayMods {
 pub struct BeatmapData {
     pub client: OsuClient,
     pub state: GameState,
+    pub ruleset: Option<u8>,
     pub id: i32,
     pub artist: String,
     pub title: String,
@@ -874,6 +880,14 @@ mod tests {
     }
 
     #[test]
+    fn only_official_rulesets_are_known() {
+        assert_eq!(known_ruleset(0), Some(0));
+        assert_eq!(known_ruleset(3), Some(3));
+        assert_eq!(known_ruleset(4), None);
+        assert_eq!(known_ruleset(-1), None);
+    }
+
+    #[test]
     fn a_state_change_changes_the_beatmap() {
         let dir = std::env::temp_dir();
         let selecting = beatmap_at(&dir, "missing.osu");
@@ -890,6 +904,7 @@ mod tests {
         let mut beatmap = BeatmapData {
             client: OsuClient::Stable,
             state: GameState::Idle,
+            ruleset: None,
             id: 0,
             artist: "artist".to_string(),
             title: "title".to_string(),

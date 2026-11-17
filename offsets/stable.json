@@ -11,7 +11,8 @@
     "base_offset": -60
   },
   "base": {
-    "beatmap_ptr": -12
+    "beatmap_ptr": -12,
+    "ruleset_ptr": -51
   },
   "beatmap": {
     "artist": 24,
