@@ -36,6 +36,7 @@ pub enum TwitchStatus {
     Disconnected,
     Connecting,
     Connected(String),
+    Reconnecting,
     Error(String),
 }
 
@@ -45,6 +46,7 @@ impl Display for TwitchStatus {
             TwitchStatus::Disconnected => write!(f, "Disconnected"),
             TwitchStatus::Connecting => write!(f, "Connecting..."),
             TwitchStatus::Connected(user) => write!(f, "Connected as {}", user),
+            TwitchStatus::Reconnecting => write!(f, "Reconnecting..."),
             TwitchStatus::Error(e) => write!(f, "Error: {}", e),
         }
     }
@@ -65,7 +67,7 @@ pub fn is_transient_network_error(message: &str) -> bool {
         || message.contains("ConnectionReset")
         || message.contains("Connection reset without closing handshake")
         || message.contains("WebSocket connection closed")
-        || message.contains("Reconnection needed")
+        || message.contains("Timed out connecting to Twitch")
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +127,7 @@ impl Default for ChatSettings {
 pub enum TwitchEvent {
     Connected(String),
     Disconnected,
+    Reconnecting(String),
     Error(String),
 }
 
@@ -965,7 +968,7 @@ SliderTickRate:1
             "WebSocket error: WebSocket protocol error: Connection reset without closing handshake",
             "WebSocket error: IO error: An existing connection was forcibly closed by the remote host. (os error 10054)",
             "WebSocket connection closed",
-            "Reconnection needed - please reconnect manually",
+            "Timed out connecting to Twitch",
         ] {
             assert!(is_transient_network_error(message), "{message}");
         }

@@ -32,7 +32,9 @@ use osu::core::{
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
 use tray::{TrayEvent, TrayStatus};
-use twitch::{TwitchClient, TwitchCommand, TwitchEvent};
+use twitch::{
+    ChatSettings, TwitchClient, TwitchCommand, TwitchEvent, is_invalid_access_token_error,
+};
 #[cfg(not(debug_assertions))]
 use updater::core::is_auto_update_enabled;
 use updater::core::set_auto_update_enabled;
@@ -463,6 +465,62 @@ async fn osu_worker() {
     }
 }
 
+const RECONNECT_DELAYS_SECS: [u64; 5] = [2, 5, 15, 30, 60];
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const STABLE_CONNECTION: Duration = Duration::from_secs(60);
+
+fn reconnect_delay(attempt: usize) -> Duration {
+    Duration::from_secs(RECONNECT_DELAYS_SECS[attempt.min(RECONNECT_DELAYS_SECS.len() - 1)])
+}
+
+struct TwitchConnection {
+    client: Arc<TwitchClient>,
+    handle: tokio::task::JoinHandle<()>,
+    since: time::Instant,
+}
+
+type ConnectionEnd = (u64, Result<(), String>);
+
+async fn open_twitch_connection(
+    token: &str,
+    settings: ChatSettings,
+    id: u64,
+    ended_tx: &mpsc::Sender<ConnectionEnd>,
+) -> Result<TwitchConnection, String> {
+    let connect = async {
+        let client = TwitchClient::new(token, settings)
+            .await
+            .map_err(|e| e.to_string())?;
+        client
+            .subscribe_to_channel_messages(&client.user.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(Arc::new(client))
+    };
+
+    let client = time::timeout(CONNECT_TIMEOUT, connect)
+        .await
+        .map_err(|_| "Timed out connecting to Twitch".to_string())??;
+
+    let handle = tokio::spawn({
+        let client = Arc::clone(&client);
+        let ended_tx = ended_tx.clone();
+        async move {
+            let result = client
+                .init_websocket_handler()
+                .await
+                .map_err(|e| e.to_string());
+            let _ = ended_tx.send((id, result)).await;
+        }
+    });
+
+    Ok(TwitchConnection {
+        client,
+        handle,
+        since: time::Instant::now(),
+    })
+}
+
 async fn twitch_worker() {
     let cmd_rx = get_twitch_channel().1.lock().unwrap().take();
     let Some(mut cmd_rx) = cmd_rx else {
@@ -470,91 +528,116 @@ async fn twitch_worker() {
     };
 
     let tx = get_twitch_event().0.clone();
+    let (ended_tx, mut ended_rx) = mpsc::channel::<ConnectionEnd>(4);
 
-    let mut websocket_handle: Option<tokio::task::JoinHandle<()>> = None;
-    let mut current_client: Option<Arc<TwitchClient>> = None;
+    let mut connection: Option<TwitchConnection> = None;
+    let mut wanted: Option<(String, ChatSettings)> = None;
+    let mut retry: Option<(time::Instant, usize)> = None;
+    let mut connection_id: u64 = 0;
+    let mut short_lived: usize = 0;
 
-    while let Some(cmd) = cmd_rx.recv().await {
-        match cmd {
-            TwitchCommand::Connect { token, settings } => {
-                if let Some(handle) = websocket_handle.take() {
-                    handle.abort();
-                }
-                current_client = None;
+    loop {
+        let retry_at = retry.map_or_else(time::Instant::now, |(at, _)| at);
 
-                let result = TwitchClient::new(&token, settings).await;
-                match result {
-                    Ok(client) => {
-                        let client = Arc::new(client);
-                        let display_name = client.user.display_name.clone();
-                        let user_id = client.user.id.clone();
+        tokio::select! {
+            cmd = cmd_rx.recv() => {
+                let Some(cmd) = cmd else {
+                    break;
+                };
 
-                        let subscribe_result = client.subscribe_to_channel_messages(&user_id).await;
+                match cmd {
+                    TwitchCommand::Connect { token, settings } => {
+                        if let Some(old) = connection.take() {
+                            old.handle.abort();
+                        }
+                        retry = None;
+                        short_lived = 0;
+                        connection_id += 1;
 
-                        match subscribe_result {
-                            Ok(()) => {
-                                let tx_clone = tx.clone();
-                                let client_clone = Arc::clone(&client);
-
-                                let ws_handle = tokio::spawn(async move {
-                                    if let Err(e) = client_clone.init_websocket_handler().await {
-                                        let err_s = e.to_string();
-                                        log_debug!("twitch", "Websocket handler error: {}", e);
-
-                                        if err_s.contains("Server requested reconnect") {
-                                            let _ = tx_clone
-                                                    .send(TwitchEvent::Error(
-                                                        "Reconnection needed - please reconnect manually"
-                                                            .to_string(),
-                                                    ))
-                                                    .await;
-                                        } else {
-                                            let _ = tx_clone
-                                                .send(TwitchEvent::Error(e.to_string()))
-                                                .await;
-                                        }
-                                    } else {
-                                        let _ = tx_clone.send(TwitchEvent::Disconnected).await;
-                                    }
-                                });
-
-                                websocket_handle = Some(ws_handle);
-                                current_client = Some(client);
-
-                                let _ = tx.send(TwitchEvent::Connected(display_name)).await;
+                        match open_twitch_connection(&token, settings.clone(), connection_id, &ended_tx).await {
+                            Ok(new) => {
+                                let name = new.client.user.display_name.clone();
+                                connection = Some(new);
+                                wanted = Some((token, settings));
+                                let _ = tx.send(TwitchEvent::Connected(name)).await;
                             }
                             Err(e) => {
-                                let error_msg = e.to_string();
-                                log_debug!("twitch", "Subscription error: {:#?}", e);
-                                let _ = tx.send(TwitchEvent::Error(error_msg)).await;
+                                log_debug!("twitch", "Failed to connect: {}", e);
+                                wanted = None;
+                                let _ = tx.send(TwitchEvent::Error(e)).await;
                             }
                         }
                     }
-                    Err(e) => {
-                        let error_msg = e.to_string();
-                        log_debug!("twitch", "Client creation error: {:#?}", e);
-                        let _ = tx.send(TwitchEvent::Error(error_msg)).await;
+                    TwitchCommand::Disconnect => {
+                        if let Some(old) = connection.take() {
+                            old.handle.abort();
+                        }
+                        wanted = None;
+                        retry = None;
+                        connection_id += 1;
+
+                        let _ = tx.send(TwitchEvent::Disconnected).await;
+                    }
+                    TwitchCommand::UpdateSettings(settings) => {
+                        if let Some((_, wanted_settings)) = &mut wanted {
+                            wanted_settings.clone_from(&settings);
+                        }
+                        if let Some(connection) = &connection {
+                            connection.client.update_settings(settings).await;
+                        }
                     }
                 }
             }
-            TwitchCommand::Disconnect => {
-                if let Some(handle) = websocket_handle.take() {
-                    handle.abort();
-                }
-                current_client = None;
 
-                let _ = tx.send(TwitchEvent::Disconnected).await;
+            Some((id, result)) = ended_rx.recv() => {
+                if id != connection_id || wanted.is_none() {
+                    continue;
+                }
+
+                let lasted = connection.take().map(|old| old.since.elapsed());
+                short_lived = match lasted {
+                    Some(lasted) if lasted < STABLE_CONNECTION => short_lived + 1,
+                    _ => 0,
+                };
+
+                let reason = result.err().unwrap_or_else(|| "closed by Twitch".to_string());
+                let _ = tx.send(TwitchEvent::Reconnecting(reason)).await;
+                retry = Some((
+                    time::Instant::now() + reconnect_delay(short_lived),
+                    short_lived,
+                ));
             }
-            TwitchCommand::UpdateSettings(settings) => {
-                if let Some(ref client) = current_client {
-                    client.update_settings(settings).await;
+
+            () = time::sleep_until(retry_at), if retry.is_some() => {
+                let Some(((token, settings), (_, attempt))) = wanted.clone().zip(retry.take()) else {
+                    continue;
+                };
+                connection_id += 1;
+
+                match open_twitch_connection(&token, settings, connection_id, &ended_tx).await {
+                    Ok(new) => {
+                        let name = new.client.user.display_name.clone();
+                        connection = Some(new);
+                        let _ = tx.send(TwitchEvent::Connected(name)).await;
+                    }
+                    Err(e) if is_invalid_access_token_error(&e) => {
+                        wanted = None;
+                        let _ = tx.send(TwitchEvent::Error(e)).await;
+                    }
+                    Err(e) => {
+                        log_debug!("twitch", "Reconnect attempt {} failed: {}", attempt + 1, e);
+                        retry = Some((
+                            time::Instant::now() + reconnect_delay(attempt + 1),
+                            attempt + 1,
+                        ));
+                    }
                 }
             }
         }
     }
 
-    if let Some(handle) = websocket_handle {
-        handle.abort();
+    if let Some(connection) = connection {
+        connection.handle.abort();
     }
 }
 
@@ -598,6 +681,13 @@ fn args_auto_update() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconnects_back_off_up_to_a_minute() {
+        assert_eq!(reconnect_delay(0), Duration::from_secs(2));
+        assert_eq!(reconnect_delay(4), Duration::from_secs(60));
+        assert_eq!(reconnect_delay(500), Duration::from_secs(60));
+    }
 
     #[test]
     fn an_unsupported_version_is_reported_once() {

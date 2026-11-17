@@ -322,10 +322,12 @@ impl State {
             .on_input(Message::TokenInputChanged);
 
         let action_button = match &self.twitch_status {
-            TwitchStatus::Connected(_) => button(text("Disconnect").size(13))
-                .style(primary_button)
-                .padding([8, 16])
-                .on_press(Message::DisconnectClicked),
+            TwitchStatus::Connected(_) | TwitchStatus::Reconnecting => {
+                button(text("Disconnect").size(13))
+                    .style(primary_button)
+                    .padding([8, 16])
+                    .on_press(Message::DisconnectClicked)
+            }
             TwitchStatus::Connecting => button(text("Connecting...").size(13))
                 .style(primary_button)
                 .padding([8, 16]),
@@ -1227,6 +1229,10 @@ impl State {
                 TwitchEvent::Disconnected => {
                     log_info!("twitch", "Disconnected");
                     self.twitch_status = TwitchStatus::Disconnected;
+                }
+                TwitchEvent::Reconnecting(ref reason) => {
+                    log_warn!("twitch", "Connection lost, reconnecting: {}", reason);
+                    self.twitch_status = TwitchStatus::Reconnecting;
                 }
                 TwitchEvent::Error(ref e) => {
                     if is_invalid_access_token_error(e) || is_transient_network_error(e) {
