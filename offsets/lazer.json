@@ -27,11 +27,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1232
+      "realm": 1232,
+      "score_manager": 1024,
+      "leaderboard_manager": 1176
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -55,7 +56,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -124,11 +127,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1224
+      "realm": 1224,
+      "score_manager": 1024,
+      "leaderboard_manager": 1176
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -152,7 +156,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -221,11 +227,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1224
+      "realm": 1224,
+      "score_manager": 1024,
+      "leaderboard_manager": 1176
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -249,7 +256,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -318,11 +327,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1224
+      "realm": 1224,
+      "score_manager": 1024,
+      "leaderboard_manager": 1176
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -346,7 +356,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -415,11 +427,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -443,7 +456,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -512,11 +527,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -540,7 +556,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -609,11 +627,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -637,7 +656,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -706,11 +727,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -734,7 +756,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -803,11 +827,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -831,7 +856,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -900,11 +927,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1168
     },
     "song_select": {
       "game_ref": 1032
@@ -928,7 +956,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -997,11 +1027,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1160
     },
     "song_select": {
       "game_ref": 1320
@@ -1025,7 +1056,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80
@@ -1093,11 +1126,12 @@
       "selected_mods": 1120,
       "available_mods": 1128,
       "api": 1080,
-      "realm": 1216
+      "realm": 1216,
+      "score_manager": 1024,
+      "leaderboard_manager": 1168
     },
-    "submitting_player": {
-      "beatmap": 1264,
-      "ruleset": 1272
+    "player_loader": {
+      "leaderboard_manager": 1160
     },
     "song_select": {
       "game_ref": 1304
@@ -1121,7 +1155,9 @@
       "username": 24
     },
     "player": {
-      "score": 1152
+      "score": 1152,
+      "api": 1008,
+      "score_manager": 1000
     },
     "score_info": {
       "mods_json": 80

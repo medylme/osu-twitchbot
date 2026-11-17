@@ -190,7 +190,7 @@ struct Offsets {
     #[serde(default)]
     wrapped_storage: WrappedStorageOffsets,
     #[serde(default)]
-    submitting_player: SubmittingPlayer,
+    player_loader: PlayerLoaderOffsets,
     #[serde(default)]
     song_select: SongSelect,
     #[serde(default)]
@@ -260,12 +260,15 @@ struct OsuGameBase {
     api: usize,
     #[serde(default)]
     realm: usize,
+    #[serde(default)]
+    score_manager: usize,
+    #[serde(default)]
+    leaderboard_manager: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
-struct SubmittingPlayer {
-    beatmap: usize,
-    ruleset: usize,
+struct PlayerLoaderOffsets {
+    leaderboard_manager: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -345,6 +348,10 @@ struct RealmUser {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct Player {
     score: usize,
+    #[serde(default)]
+    api: usize,
+    #[serde(default)]
+    score_manager: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -614,28 +621,23 @@ impl LazerReader {
     }
 
     fn is_player_screen(&self, screen: usize) -> bool {
-        let sp = &self.offsets.submitting_player;
+        let player = &self.offsets.player;
         let gb = &self.offsets.osu_game_base;
 
-        if sp.beatmap == 0 || sp.ruleset == 0 || gb.ruleset == 0 {
-            return false;
-        }
+        self.screen_shares(screen, player.api, gb.api)
+            && self.screen_shares(screen, player.score_manager, gb.score_manager)
+    }
 
-        let screen_beatmap = self.process.read_ptr(screen + sp.beatmap).unwrap_or(0);
-        let game_beatmap = self
-            .process
-            .read_ptr(self.game_base + gb.beatmap)
-            .unwrap_or(0);
-        let screen_ruleset = self.process.read_ptr(screen + sp.ruleset).unwrap_or(0);
-        let game_ruleset = self
-            .process
-            .read_ptr(self.game_base + gb.ruleset)
-            .unwrap_or(0);
-
-        screen_beatmap != 0
-            && screen_beatmap == game_beatmap
-            && screen_ruleset != 0
-            && screen_ruleset == game_ruleset
+    fn is_player_loader_screen(&self, screen: usize) -> bool {
+        self.screen_shares(
+            screen,
+            self.offsets.osu_screen.logo,
+            self.offsets.osu_game.osu_logo,
+        ) && self.screen_shares(
+            screen,
+            self.offsets.player_loader.leaderboard_manager,
+            self.offsets.osu_game_base.leaderboard_manager,
+        )
     }
 
     fn is_song_select_screen(&self, screen: usize) -> bool {
@@ -808,7 +810,7 @@ impl LazerReader {
             return GameState::Idle;
         };
 
-        if self.is_player_screen(screen) {
+        if self.is_player_screen(screen) || self.is_player_loader_screen(screen) {
             GameState::Playing
         // a test play keeps the editor underneath
         } else if self.has_editor_in_stack() {
@@ -825,6 +827,10 @@ impl LazerReader {
     fn read_mods_for_screen(&mut self) -> Option<GameplayMods> {
         let screen = self.get_current_screen()?;
 
+        if self.has_editor_in_stack() {
+            return None;
+        }
+
         if self.is_player_screen(screen)
             && let Some(score_info) = self.try_get_score_info_from_player(screen)
             && let Some(mods) = self.read_mods_from_score_info(score_info)
@@ -832,7 +838,7 @@ impl LazerReader {
             return Some(mods);
         }
 
-        if self.has_song_select_in_stack() && !self.has_editor_in_stack() {
+        if self.has_song_select_in_stack() {
             return self.read_selected_mods();
         }
 
@@ -1367,6 +1373,11 @@ mod tests {
                 o.editor.realm,
                 o.results_screen.api,
                 o.osu_screen.logo,
+                o.osu_game_base.score_manager,
+                o.osu_game_base.leaderboard_manager,
+                o.player.api,
+                o.player.score_manager,
+                o.player_loader.leaderboard_manager,
             ];
 
             assert!(state_offsets.iter().all(|offset| *offset != 0), "{version}");
