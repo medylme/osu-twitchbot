@@ -298,6 +298,7 @@ fn difficulty_for(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuCli
 struct RatedMap {
     difficulty: Difficulty,
     attributes: DifficultyAttributes,
+    mode: GameMode,
     analysis: MapAnalysis,
 }
 
@@ -395,6 +396,7 @@ fn rate(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) -> Ra
     };
 
     RatedMap {
+        mode: game_mode(beatmap),
         difficulty,
         attributes,
         analysis,
@@ -468,6 +470,24 @@ fn parse_beatmap(data: &BeatmapData) -> Result<Beatmap, PpError> {
     convert_to_ruleset(&mut beatmap, data.ruleset, &data.mods);
 
     Ok(beatmap)
+}
+
+fn mods_fit(mods: &GameplayMods, mode: GameMode) -> bool {
+    let game_mods: GameMods = mods
+        .mods
+        .iter()
+        .map(|mod_info| GameMod::new(&mod_info.acronym, mode))
+        .collect();
+
+    game_mods.is_valid()
+        && !game_mods
+            .iter()
+            .any(|gamemod| matches!(gamemod.intermode(), GameModIntermode::Unknown(_)))
+}
+
+// false when the mods exclude each other or the map's mode has no such mod
+pub fn mods_fit_map(data: &BeatmapData, mods: &GameplayMods) -> bool {
+    rated_map(data).map_or(true, |rated| mods_fit(mods, rated.mode))
 }
 
 pub fn calculate_score_pp(data: &BeatmapData, args: &PpArgs) -> Result<ScorePp, PpError> {
@@ -811,6 +831,18 @@ SliderTickRate:1
         let score = score_with("100 9999x 9999m");
 
         assert_eq!((score.combo, score.misses), (8, 8));
+    }
+
+    #[test]
+    fn mods_must_suit_each_other_and_the_mode() {
+        let fit = |text, mode| mods_fit(&parse_mods(text).unwrap(), mode);
+
+        assert!(fit("HDDT", GameMode::Osu));
+        assert!(fit("NM", GameMode::Osu));
+        assert!(!fit("DTHT", GameMode::Osu));
+        assert!(!fit("EZHR", GameMode::Osu));
+        assert!(!fit("FI", GameMode::Osu));
+        assert!(fit("FI", GameMode::Mania));
     }
 
     #[test]

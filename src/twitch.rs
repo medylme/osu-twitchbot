@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, UserProfile};
-use crate::osu::pp::{PpArgs, analyze_map, calculate_score_pp};
+use crate::osu::pp::{PpArgs, analyze_map, calculate_score_pp, mods_fit_map};
 use crate::placeholders::Placeholders;
 use crate::{log_debug, log_error, log_info, log_warn};
 
@@ -543,8 +543,9 @@ impl TwitchClient {
             CommandType::Rank => String::new(),
             CommandType::PerformancePoints => {
                 let args = PpArgs::parse(args);
+                let requested = args.mods.clone().filter(|mods| mods_fit_map(beatmap, mods));
                 let beatmap = &BeatmapData {
-                    mods: args.mods.clone().or_else(|| beatmap.mods.clone()),
+                    mods: requested.or_else(|| beatmap.mods.clone()),
                     ..beatmap.clone()
                 };
                 let placeholders = Placeholders::from_beatmap(beatmap);
@@ -1053,6 +1054,12 @@ SliderTickRate:1
         assert!(dt.starts_with("spread "), "{dt}");
         assert!(dt.ends_with(" +DT"), "{dt}");
         assert_ne!(hd, dt);
+    }
+
+    #[test]
+    fn mods_that_make_no_sense_are_ignored() {
+        assert!(pp_reply("mods-conflict", "+DTHT").ends_with(" +HD"));
+        assert!(pp_reply("mods-mode", "+FI").ends_with(" +HD"));
     }
 
     #[test]
