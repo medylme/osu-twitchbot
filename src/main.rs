@@ -439,20 +439,13 @@ async fn twitch_worker() {
 
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            TwitchCommand::Connect {
-                token,
-                np_command,
-                np_format,
-                pp_command,
-                pp_format,
-            } => {
+            TwitchCommand::Connect { token, settings } => {
                 if let Some(handle) = websocket_handle.take() {
                     handle.abort();
                 }
                 current_client = None;
 
-                let result =
-                    TwitchClient::new(&token, np_command, np_format, pp_command, pp_format).await;
+                let result = TwitchClient::new(&token, settings).await;
                 match result {
                     Ok(client) => {
                         let client = Arc::new(client);
@@ -546,16 +539,9 @@ async fn twitch_worker() {
 
                 let _ = tx.send(TwitchEvent::Disconnected).await;
             }
-            TwitchCommand::UpdatePreferences {
-                np_command,
-                np_format,
-                pp_command,
-                pp_format,
-            } => {
+            TwitchCommand::UpdateSettings(settings) => {
                 if let Some(ref client) = current_client {
-                    client
-                        .update_preferences(np_command, np_format, pp_command, pp_format)
-                        .await;
+                    client.update_settings(settings).await;
                 }
             }
         }

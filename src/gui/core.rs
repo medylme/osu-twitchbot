@@ -25,7 +25,7 @@ use crate::placeholders::Placeholders;
 use crate::preferences::PreferencesStore;
 use crate::tray::{TrayEvent, TrayStatus};
 use crate::twitch::{
-    DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT,
+    ChatSettings, DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT,
     INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
     is_invalid_access_token_error, is_transient_network_error,
 };
@@ -87,10 +87,7 @@ pub struct State {
     token_saved: bool,
     auto_connect_value: bool,
     minimize_to_tray_value: bool,
-    np_command: String,
-    np_format: String,
-    pp_command: String,
-    pp_format: String,
+    chat: ChatSettings,
     current_beatmap: Option<BeatmapData>,
     cached_map: Option<MapAnalysis>,
     placeholder_copied: bool,
@@ -130,30 +127,15 @@ impl State {
         };
 
         let prefs = PreferencesStore::load_or_default();
-        let (
-            auto_connect_value,
-            minimize_to_tray_value,
-            np_command,
-            np_format,
-            pp_command,
-            pp_format,
-        ) = (
-            prefs.auto_connect(),
-            prefs.minimize_to_tray(),
-            prefs.np_command().to_string(),
-            prefs.np_format().to_string(),
-            prefs.pp_command().to_string(),
-            prefs.pp_format().to_string(),
-        );
+        let auto_connect_value = prefs.auto_connect();
+        let minimize_to_tray_value = prefs.minimize_to_tray();
+        let chat = prefs.chat_settings();
 
         let twitch_status = if auto_connect_value && token_saved {
             log_info!("gui", "Auto-connecting to Twitch...");
             let _ = twitch_cmd_tx.clone().try_send(TwitchCommand::Connect {
                 token: token_input_value.clone(),
-                np_command: np_command.clone(),
-                np_format: np_format.clone(),
-                pp_command: pp_command.clone(),
-                pp_format: pp_format.clone(),
+                settings: chat.clone(),
             });
             TwitchStatus::Connecting
         } else {
@@ -166,10 +148,7 @@ impl State {
             token_saved,
             auto_connect_value,
             minimize_to_tray_value,
-            np_command,
-            np_format,
-            pp_command,
-            pp_format,
+            chat,
             current_beatmap: None,
             cached_map: None,
             placeholder_copied: false,
@@ -479,11 +458,11 @@ impl State {
         let np_section = self.command_format_section(
             p,
             "Now Playing",
-            &self.np_command,
+            &self.chat.np_command,
             DEFAULT_NP_COMMAND,
             Message::NpCommandChanged,
             Message::ResetNpCommand,
-            &self.np_format,
+            &self.chat.np_format,
             DEFAULT_NP_FORMAT,
             Message::NpFormatChanged,
             Message::ResetNpFormat,
@@ -497,11 +476,11 @@ impl State {
         let pp_section = self.command_format_section(
             p,
             "Performance Points",
-            &self.pp_command,
+            &self.chat.pp_command,
             DEFAULT_PP_COMMAND,
             Message::PpCommandChanged,
             Message::ResetPpCommand,
-            &self.pp_format,
+            &self.chat.pp_format,
             DEFAULT_PP_FORMAT,
             Message::PpFormatChanged,
             Message::ResetPpFormat,
@@ -817,7 +796,7 @@ impl State {
             .map(|beatmap| Placeholders::from_beatmap(beatmap).with_stats(self.map_stats()))
             .unwrap_or_else(Placeholders::sample);
 
-        self.chat_preview(p, placeholders.apply_np(&self.np_format))
+        self.chat_preview(p, placeholders.apply_np(&self.chat.np_format))
     }
 
     fn build_pp_format_preview(&self, p: &ColorPalette) -> Element<'_, Message> {
@@ -828,7 +807,17 @@ impl State {
             _ => Placeholders::sample_pp(),
         };
 
-        self.chat_preview(p, placeholders.apply_pp(&self.pp_format))
+        self.chat_preview(p, placeholders.apply_pp(&self.chat.pp_format))
+    }
+
+    fn chat_settings_changed(&mut self) {
+        log_debug!("gui", "Changed chat settings to {:?}", self.chat);
+        if let Err(e) = self.prefs.set_chat_settings(&self.chat) {
+            log_warn!("gui", "Failed to save chat settings: {}", e);
+        }
+        let _ = self
+            .twitch_cmd_tx
+            .try_send(TwitchCommand::UpdateSettings(self.chat.clone()));
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -940,10 +929,7 @@ impl State {
 
                 if let Err(e) = self.twitch_cmd_tx.try_send(TwitchCommand::Connect {
                     token,
-                    np_command: self.np_command.clone(),
-                    np_format: self.np_format.clone(),
-                    pp_command: self.pp_command.clone(),
-                    pp_format: self.pp_format.clone(),
+                    settings: self.chat.clone(),
                 }) {
                     log_error!("gui", "Failed to send connect command: {}", e);
                     self.twitch_status =
@@ -968,124 +954,36 @@ impl State {
                 self.token_saved = false;
             }
             Message::NpCommandChanged(value) => {
-                log_debug!("gui", "Changed np_command to {}", value);
-                self.np_command = value;
-                if let Err(e) = self.prefs.set_np_command(self.np_command.clone()) {
-                    log_warn!("gui", "Failed to save np_command: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: Some(self.np_command.clone()),
-                        np_format: None,
-                        pp_command: None,
-                        pp_format: None,
-                    });
+                self.chat.np_command = value;
+                self.chat_settings_changed();
             }
             Message::NpFormatChanged(value) => {
-                log_debug!("gui", "Changed np_format to {}", value);
-                self.np_format = value;
-                if let Err(e) = self.prefs.set_np_format(self.np_format.clone()) {
-                    log_warn!("gui", "Failed to save np_format: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: None,
-                        np_format: Some(self.np_format.clone()),
-                        pp_command: None,
-                        pp_format: None,
-                    });
+                self.chat.np_format = value;
+                self.chat_settings_changed();
             }
             Message::ResetNpCommand => {
-                log_debug!("gui", "Reset np_command to default");
-                self.np_command = DEFAULT_NP_COMMAND.to_string();
-                if let Err(e) = self.prefs.set_np_command(self.np_command.clone()) {
-                    log_warn!("gui", "Failed to save np_command: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: Some(self.np_command.clone()),
-                        np_format: None,
-                        pp_command: None,
-                        pp_format: None,
-                    });
+                self.chat.np_command = DEFAULT_NP_COMMAND.to_string();
+                self.chat_settings_changed();
             }
             Message::ResetNpFormat => {
-                log_debug!("gui", "Reset np_format to default");
-                self.np_format = DEFAULT_NP_FORMAT.to_string();
-                if let Err(e) = self.prefs.set_np_format(self.np_format.clone()) {
-                    log_warn!("gui", "Failed to save np_format: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: None,
-                        np_format: Some(self.np_format.clone()),
-                        pp_command: None,
-                        pp_format: None,
-                    });
+                self.chat.np_format = DEFAULT_NP_FORMAT.to_string();
+                self.chat_settings_changed();
             }
             Message::PpCommandChanged(value) => {
-                log_debug!("gui", "Changed pp_command to {}", value);
-                self.pp_command = value;
-                if let Err(e) = self.prefs.set_pp_command(self.pp_command.clone()) {
-                    log_warn!("gui", "Failed to save pp_command: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: None,
-                        np_format: None,
-                        pp_command: Some(self.pp_command.clone()),
-                        pp_format: None,
-                    });
+                self.chat.pp_command = value;
+                self.chat_settings_changed();
             }
             Message::PpFormatChanged(value) => {
-                log_debug!("gui", "Changed pp_format to {}", value);
-                self.pp_format = value;
-                if let Err(e) = self.prefs.set_pp_format(self.pp_format.clone()) {
-                    log_warn!("gui", "Failed to save pp_format: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: None,
-                        np_format: None,
-                        pp_command: None,
-                        pp_format: Some(self.pp_format.clone()),
-                    });
+                self.chat.pp_format = value;
+                self.chat_settings_changed();
             }
             Message::ResetPpCommand => {
-                log_debug!("gui", "Reset pp_command to default");
-                self.pp_command = DEFAULT_PP_COMMAND.to_string();
-                if let Err(e) = self.prefs.set_pp_command(self.pp_command.clone()) {
-                    log_warn!("gui", "Failed to save pp_command: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: None,
-                        np_format: None,
-                        pp_command: Some(self.pp_command.clone()),
-                        pp_format: None,
-                    });
+                self.chat.pp_command = DEFAULT_PP_COMMAND.to_string();
+                self.chat_settings_changed();
             }
             Message::ResetPpFormat => {
-                log_debug!("gui", "Reset pp_format to default");
-                self.pp_format = DEFAULT_PP_FORMAT.to_string();
-                if let Err(e) = self.prefs.set_pp_format(self.pp_format.clone()) {
-                    log_warn!("gui", "Failed to save pp_format: {}", e);
-                }
-                let _ = self
-                    .twitch_cmd_tx
-                    .try_send(TwitchCommand::UpdatePreferences {
-                        np_command: None,
-                        np_format: None,
-                        pp_command: None,
-                        pp_format: Some(self.pp_format.clone()),
-                    });
+                self.chat.pp_format = DEFAULT_PP_FORMAT.to_string();
+                self.chat_settings_changed();
             }
             Message::OsuEvent(event) => match event {
                 MemoryEvent::StatusChanged(ref status) => {

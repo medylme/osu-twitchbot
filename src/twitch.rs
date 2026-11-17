@@ -65,18 +65,29 @@ pub fn is_transient_network_error(message: &str) -> bool {
 pub enum TwitchCommand {
     Connect {
         token: String,
-        np_command: String,
-        np_format: String,
-        pp_command: String,
-        pp_format: String,
+        settings: ChatSettings,
     },
     Disconnect,
-    UpdatePreferences {
-        np_command: Option<String>,
-        np_format: Option<String>,
-        pp_command: Option<String>,
-        pp_format: Option<String>,
-    },
+    UpdateSettings(ChatSettings),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatSettings {
+    pub np_command: String,
+    pub np_format: String,
+    pub pp_command: String,
+    pub pp_format: String,
+}
+
+impl Default for ChatSettings {
+    fn default() -> Self {
+        Self {
+            np_command: DEFAULT_NP_COMMAND.to_string(),
+            np_format: DEFAULT_NP_FORMAT.to_string(),
+            pp_command: DEFAULT_PP_COMMAND.to_string(),
+            pp_format: DEFAULT_PP_FORMAT.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -290,68 +301,17 @@ struct Session {
     read: Arc<Mutex<SplitStream<WebSocketType>>>,
 }
 
-pub struct ChatbotPreferences {
-    pub np: CommandConfig,
-    pub pp: CommandConfig,
-}
-
-pub(crate) struct CommandConfig {
-    pub command: Arc<Mutex<String>>,
-    pub format: Arc<Mutex<String>>,
-}
-
-pub(crate) struct CommandConfigInit {
-    pub command: String,
-    pub format: String,
-}
-
-impl ChatbotPreferences {
-    pub fn new(np: CommandConfigInit, pp: CommandConfigInit) -> Self {
-        Self {
-            np: CommandConfig {
-                command: Arc::new(Mutex::new(np.command)),
-                format: Arc::new(Mutex::new(np.format)),
-            },
-            pp: CommandConfig {
-                command: Arc::new(Mutex::new(pp.command)),
-                format: Arc::new(Mutex::new(pp.format)),
-            },
-        }
-    }
-}
-
-impl Default for ChatbotPreferences {
-    fn default() -> Self {
-        Self::new(
-            CommandConfigInit {
-                command: DEFAULT_NP_COMMAND.to_string(),
-                format: DEFAULT_NP_FORMAT.to_string(),
-            },
-            CommandConfigInit {
-                command: DEFAULT_PP_COMMAND.to_string(),
-                format: DEFAULT_PP_FORMAT.to_string(),
-            },
-        )
-    }
-}
-
 pub struct TwitchClient {
     client_id: String,
     pub user: TwitchUser,
     session: Session,
     access_token: String,
     http_client: reqwest::Client,
-    pub chatbot_preferences: ChatbotPreferences,
+    settings: Mutex<ChatSettings>,
 }
 
 impl TwitchClient {
-    pub async fn new(
-        access_token: &str,
-        np_command: String,
-        np_format: String,
-        pp_command: String,
-        pp_format: String,
-    ) -> Result<Self, BoxError> {
+    pub async fn new(access_token: &str, settings: ChatSettings) -> Result<Self, BoxError> {
         log_debug!("twitch", "Creating new TwitchClient");
         let client_id = env!("TWITCH_CLIENT_ID");
 
@@ -373,46 +333,13 @@ impl TwitchClient {
             session,
             access_token: access_token.to_string(),
             http_client,
-            chatbot_preferences: ChatbotPreferences::new(
-                CommandConfigInit {
-                    command: np_command,
-                    format: np_format,
-                },
-                CommandConfigInit {
-                    command: pp_command,
-                    format: pp_format,
-                },
-            ),
+            settings: Mutex::new(settings),
         })
     }
 
-    pub async fn update_preferences(
-        &self,
-        np_command: Option<String>,
-        np_format: Option<String>,
-        pp_command: Option<String>,
-        pp_format: Option<String>,
-    ) {
-        if let Some(cmd) = np_command {
-            let mut command = self.chatbot_preferences.np.command.lock().await;
-            *command = cmd;
-            log_debug!("twitch", "Updated np_command to: {}", *command);
-        }
-        if let Some(fmt) = np_format {
-            let mut format = self.chatbot_preferences.np.format.lock().await;
-            *format = fmt;
-            log_debug!("twitch", "Updated np_format to: {}", *format);
-        }
-        if let Some(cmd) = pp_command {
-            let mut command = self.chatbot_preferences.pp.command.lock().await;
-            *command = cmd;
-            log_debug!("twitch", "Updated pp_command to: {}", *command);
-        }
-        if let Some(fmt) = pp_format {
-            let mut format = self.chatbot_preferences.pp.format.lock().await;
-            *format = fmt;
-            log_debug!("twitch", "Updated pp_format to: {}", *format);
-        }
+    pub async fn update_settings(&self, settings: ChatSettings) {
+        log_debug!("twitch", "Updated chat settings: {:?}", settings);
+        *self.settings.lock().await = settings;
     }
 
     pub async fn subscribe_to_channel_messages(&self, channel_id: &str) -> Result<(), BoxError> {
@@ -553,7 +480,11 @@ impl TwitchClient {
         }
     }
 
-    async fn build_reply(&self, command_type: &CommandType, beatmap: &BeatmapData) -> String {
+    fn build_reply(
+        settings: &ChatSettings,
+        command_type: &CommandType,
+        beatmap: &BeatmapData,
+    ) -> String {
         let analyze = || {
             analyze_map(
                 &beatmap.mods,
@@ -564,30 +495,26 @@ impl TwitchClient {
 
         match command_type {
             CommandType::NowPlaying => {
-                let format_template = self.chatbot_preferences.np.format.lock().await.clone();
                 let mut placeholders = Placeholders::from_beatmap(beatmap);
 
-                if Placeholders::uses_stats(&format_template) {
+                if Placeholders::uses_stats(&settings.np_format) {
                     let analysis = analyze()
                         .inspect_err(|e| log_debug!("twitch", "map stats not available: {}", e))
                         .ok();
                     placeholders = placeholders.with_stats(analysis.as_ref().map(|a| &a.stats));
                 }
 
-                placeholders.apply_np(&format_template)
+                placeholders.apply_np(&settings.np_format)
             }
-            CommandType::PerformancePoints => {
-                let pp_format_template = self.chatbot_preferences.pp.format.lock().await.clone();
-                match analyze() {
-                    Ok(analysis) => Placeholders::from_beatmap(beatmap)
-                        .with_pp(&analysis.pp)
-                        .apply_pp(&pp_format_template),
-                    Err(e) => {
-                        log_debug!("twitch", "pp not available: {}", e);
-                        "pp calculation currently not available".to_string()
-                    }
+            CommandType::PerformancePoints => match analyze() {
+                Ok(analysis) => Placeholders::from_beatmap(beatmap)
+                    .with_pp(&analysis.pp)
+                    .apply_pp(&settings.pp_format),
+                Err(e) => {
+                    log_debug!("twitch", "pp not available: {}", e);
+                    "pp calculation currently not available".to_string()
                 }
-            }
+            },
         }
     }
 
@@ -617,10 +544,9 @@ impl TwitchClient {
                         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
                     if let Some(event) = event_data {
-                        let np_command = self.chatbot_preferences.np.command.lock().await.clone();
-                        let pp_command = self.chatbot_preferences.pp.command.lock().await.clone();
-                        let np_command = np_command.trim();
-                        let pp_command = pp_command.trim();
+                        let settings = self.settings.lock().await.clone();
+                        let np_command = settings.np_command.trim();
+                        let pp_command = settings.pp_command.trim();
                         let text = event.message.text.trim();
                         let first_word = text.split_whitespace().next().unwrap_or("");
 
@@ -655,7 +581,7 @@ impl TwitchClient {
                             );
 
                             let reply = match latest_beatmap {
-                                Some(beatmap) => self.build_reply(&cmd_type, beatmap).await,
+                                Some(beatmap) => Self::build_reply(&settings, &cmd_type, beatmap),
                                 None => "No beatmap currently selected".to_string(),
                             };
 

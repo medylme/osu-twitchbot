@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::log_warn;
-use crate::twitch::{DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT};
+use crate::twitch::ChatSettings;
 
 use super::{APP_NAME, VERSION};
 
@@ -43,13 +43,15 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        let chat = ChatSettings::default();
+
         Self {
             version: VERSION.to_string(),
             auto_connect: false,
-            np_command: DEFAULT_NP_COMMAND.to_string(),
-            np_format: DEFAULT_NP_FORMAT.to_string(),
-            pp_command: DEFAULT_PP_COMMAND.to_string(),
-            pp_format: DEFAULT_PP_FORMAT.to_string(),
+            np_command: chat.np_command,
+            np_format: chat.np_format,
+            pp_command: chat.pp_command,
+            pp_format: chat.pp_format,
             telemetry_enabled: true,
             minimize_to_tray: true,
         }
@@ -113,20 +115,13 @@ impl PreferencesStore {
         self.config.minimize_to_tray
     }
 
-    pub fn np_command(&self) -> &str {
-        &self.config.np_command
-    }
-
-    pub fn np_format(&self) -> &str {
-        &self.config.np_format
-    }
-
-    pub fn pp_command(&self) -> &str {
-        &self.config.pp_command
-    }
-
-    pub fn pp_format(&self) -> &str {
-        &self.config.pp_format
+    pub fn chat_settings(&self) -> ChatSettings {
+        ChatSettings {
+            np_command: self.config.np_command.clone(),
+            np_format: self.config.np_format.clone(),
+            pp_command: self.config.pp_command.clone(),
+            pp_format: self.config.pp_format.clone(),
+        }
     }
 
     pub fn set_auto_connect(&mut self, value: bool) -> Result<(), PreferencesError> {
@@ -139,23 +134,11 @@ impl PreferencesStore {
         self.save()
     }
 
-    pub fn set_np_command(&mut self, value: String) -> Result<(), PreferencesError> {
-        self.config.np_command = value;
-        self.save()
-    }
-
-    pub fn set_np_format(&mut self, value: String) -> Result<(), PreferencesError> {
-        self.config.np_format = value;
-        self.save()
-    }
-
-    pub fn set_pp_command(&mut self, value: String) -> Result<(), PreferencesError> {
-        self.config.pp_command = value;
-        self.save()
-    }
-
-    pub fn set_pp_format(&mut self, value: String) -> Result<(), PreferencesError> {
-        self.config.pp_format = value;
+    pub fn set_chat_settings(&mut self, chat: &ChatSettings) -> Result<(), PreferencesError> {
+        self.config.np_command.clone_from(&chat.np_command);
+        self.config.np_format.clone_from(&chat.np_format);
+        self.config.pp_command.clone_from(&chat.pp_command);
+        self.config.pp_format.clone_from(&chat.pp_format);
         self.save()
     }
 }
