@@ -267,7 +267,8 @@ impl StableReader {
     fn read_mods(&self) -> Option<GameplayMods> {
         let status = self.read_status()?;
 
-        if status == 0 {
+        // menu, editor, editor song select
+        if matches!(status, 0 | 1 | 4) {
             return None;
         }
 
