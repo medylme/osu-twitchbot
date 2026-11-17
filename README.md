@@ -87,7 +87,7 @@ Viewers can add arguments after the command, in any order:
 | Argument  | Example | Description                                  |
 | --------- | ------- | -------------------------------------------- |
 | Accuracy  | `98.5`  | PP for that accuracy                         |
-| Combo     | `800x`  | Max combo of the score                       |
+| Combo     | `800x`  | Max combo of the score (only affects stable) |
 | Misses    | `2m`    | Number of misses                             |
 | Mods      | `+HDDT` | Use these mods instead of the selected ones (`+NM` for none) |
 

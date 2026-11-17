@@ -7,8 +7,8 @@ use tokio::time::{self, Duration};
 
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameplayMods,
-    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuCommand, OsuStatus,
-    ProcessMemory, order_mods, parse_pattern, privilege_hint, rate_mod_default,
+    MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
+    OsuStatus, ProcessMemory, order_mods, parse_pattern, privilege_hint, rate_mod_default,
 };
 use crate::{log_debug, log_info, log_warn};
 
@@ -696,6 +696,7 @@ impl LazerReader {
 
     pub fn read_beatmap(&mut self) -> Result<BeatmapData, MemoryError> {
         let unknown_data = BeatmapData {
+            client: OsuClient::Lazer,
             id: 0,
             artist: "?".to_string(),
             title: "?".to_string(),
@@ -840,6 +841,7 @@ impl LazerReader {
         let (osu_file_path, songs_folder) = self.read_beatmap_file_info(beatmap_info);
 
         Ok(BeatmapData {
+            client: OsuClient::Lazer,
             id,
             artist,
             title,

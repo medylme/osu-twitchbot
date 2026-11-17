@@ -128,6 +128,7 @@ pub struct GameplayMods {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeatmapData {
+    pub client: OsuClient,
     pub id: i32,
     pub artist: String,
     pub title: String,
@@ -828,6 +829,7 @@ mod tests {
 
     fn beatmap_at(songs_folder: &Path, file: &str) -> BeatmapData {
         let mut beatmap = BeatmapData {
+            client: OsuClient::Stable,
             id: 0,
             artist: "artist".to_string(),
             title: "title".to_string(),

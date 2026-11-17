@@ -7,7 +7,7 @@ use rosu_pp::{Beatmap, Difficulty, Performance};
 use serde::de::DeserializeSeed;
 use thiserror::Error;
 
-use super::core::{GameplayMods, ModInfo, order_mods};
+use super::core::{BeatmapData, GameplayMods, ModInfo, OsuClient, order_mods};
 use crate::log_warn;
 
 #[derive(Debug, Error)]
@@ -283,8 +283,15 @@ fn last_object_end(beatmap: &Beatmap) -> Option<f64> {
     Some(start + duration)
 }
 
-fn analyze(beatmap: &Beatmap, mods: &Option<GameplayMods>) -> MapAnalysis {
-    let difficulty = Difficulty::new().mods(build_mods(mods, game_mode(beatmap)));
+// stable scores have no slider acc and estimate misses from the combo
+fn difficulty_for(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) -> Difficulty {
+    Difficulty::new()
+        .mods(build_mods(mods, game_mode(beatmap)))
+        .lazer(client == OsuClient::Lazer)
+}
+
+fn analyze(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) -> MapAnalysis {
+    let difficulty = difficulty_for(beatmap, mods, client);
     let attributes = difficulty.calculate(beatmap);
 
     let map_attributes = beatmap.attributes().difficulty(&difficulty).build();
@@ -328,8 +335,13 @@ fn analyze(beatmap: &Beatmap, mods: &Option<GameplayMods>) -> MapAnalysis {
     }
 }
 
-fn score_pp(beatmap: &Beatmap, mods: &Option<GameplayMods>, args: &PpArgs) -> ScorePp {
-    let difficulty = Difficulty::new().mods(build_mods(mods, game_mode(beatmap)));
+fn score_pp(
+    beatmap: &Beatmap,
+    mods: &Option<GameplayMods>,
+    client: OsuClient,
+    args: &PpArgs,
+) -> ScorePp {
+    let difficulty = difficulty_for(beatmap, mods, client);
     let attributes = difficulty.calculate(beatmap);
 
     let max_combo = attributes.max_combo();
@@ -362,30 +374,21 @@ fn score_pp(beatmap: &Beatmap, mods: &Option<GameplayMods>, args: &PpArgs) -> Sc
     }
 }
 
-fn parse_beatmap(local_path: Option<&str>, songs_folder: Option<&str>) -> Result<Beatmap, PpError> {
-    let osu_file = load_beatmap(local_path, songs_folder)?;
+fn parse_beatmap(data: &BeatmapData) -> Result<Beatmap, PpError> {
+    let osu_file = load_beatmap(data.osu_file_path.as_deref(), data.songs_folder.as_deref())?;
     Beatmap::from_bytes(&osu_file).map_err(|e| PpError::Parse(e.to_string()))
 }
 
-pub fn calculate_score_pp(
-    mods: &Option<GameplayMods>,
-    local_path: Option<&str>,
-    songs_folder: Option<&str>,
-    args: &PpArgs,
-) -> Result<ScorePp, PpError> {
-    let beatmap = parse_beatmap(local_path, songs_folder)?;
+pub fn calculate_score_pp(data: &BeatmapData, args: &PpArgs) -> Result<ScorePp, PpError> {
+    let beatmap = parse_beatmap(data)?;
 
-    Ok(score_pp(&beatmap, mods, args))
+    Ok(score_pp(&beatmap, &data.mods, data.client, args))
 }
 
-pub fn analyze_map(
-    mods: &Option<GameplayMods>,
-    local_path: Option<&str>,
-    songs_folder: Option<&str>,
-) -> Result<MapAnalysis, PpError> {
-    let beatmap = parse_beatmap(local_path, songs_folder)?;
+pub fn analyze_map(data: &BeatmapData) -> Result<MapAnalysis, PpError> {
+    let beatmap = parse_beatmap(data)?;
 
-    Ok(analyze(&beatmap, mods))
+    Ok(analyze(&beatmap, &data.mods, data.client))
 }
 
 #[cfg(test)]
@@ -458,7 +461,7 @@ SliderTickRate:1
             mods_string: String::new(),
         });
 
-        analyze(&beatmap, &mods)
+        analyze(&beatmap, &mods, OsuClient::Lazer)
     }
 
     #[test]
@@ -576,7 +579,7 @@ SliderTickRate:1
         let beatmap = Beatmap::from_bytes(TEST_MAP.as_bytes()).unwrap();
         let args = PpArgs::parse(text);
 
-        score_pp(&beatmap, &args.mods, &args)
+        score_pp(&beatmap, &args.mods, OsuClient::Lazer, &args)
     }
 
     #[test]
@@ -588,6 +591,37 @@ SliderTickRate:1
         assert!(score_with("95").pp < full.pp);
         assert!(score_with("100 1m").pp < full.pp);
         assert!(score_with("100 +DT").pp > full.pp);
+    }
+
+    fn slider_map() -> Beatmap {
+        let map = TEST_MAP
+            .replace("192,64,250,1,0,0:0:0:0", "100,64,250,2,0,L|240:64,1,140")
+            .replace("448,64,750,1,0,0:0:0:0", "100,128,750,2,0,L|240:128,1,140")
+            .replace(
+                "192,192,1250,1,0,0:0:0:0",
+                "100,192,1250,2,0,L|240:192,1,140",
+            );
+
+        Beatmap::from_bytes(map.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn stable_and_lazer_scores_differ() {
+        let beatmap = slider_map();
+        let stable = analyze(&beatmap, &None, OsuClient::Stable).pp;
+        let lazer = analyze(&beatmap, &None, OsuClient::Lazer).pp;
+
+        assert_ne!(stable.pp_100, lazer.pp_100);
+        assert_ne!(stable.pp_95, lazer.pp_95);
+    }
+
+    #[test]
+    fn a_dropped_combo_only_costs_pp_on_stable() {
+        let beatmap = slider_map();
+        let pp = |client, text| score_pp(&beatmap, &None, client, &PpArgs::parse(text)).pp;
+
+        assert!(pp(OsuClient::Stable, "90 4x") < pp(OsuClient::Stable, "90"));
+        assert_eq!(pp(OsuClient::Lazer, "90 4x"), pp(OsuClient::Lazer, "90"));
     }
 
     #[test]

@@ -489,15 +489,12 @@ impl TwitchClient {
         beatmap: &BeatmapData,
         args: &str,
     ) -> String {
-        let path = beatmap.osu_file_path.as_deref();
-        let songs_folder = beatmap.songs_folder.as_deref();
-
         match command_type {
             CommandType::NowPlaying => {
                 let mut placeholders = Placeholders::from_beatmap(beatmap);
 
                 if Placeholders::uses_stats(&settings.np_format) {
-                    let analysis = analyze_map(&beatmap.mods, path, songs_folder)
+                    let analysis = analyze_map(beatmap)
                         .inspect_err(|e| log_debug!("twitch", "map stats not available: {}", e))
                         .ok();
                     placeholders = placeholders.with_stats(analysis.as_ref().map(|a| &a.stats));
@@ -514,13 +511,13 @@ impl TwitchClient {
                 let placeholders = Placeholders::from_beatmap(beatmap);
 
                 let reply = if args.is_score() {
-                    calculate_score_pp(&beatmap.mods, path, songs_folder, &args).map(|score| {
+                    calculate_score_pp(beatmap, &args).map(|score| {
                         placeholders
                             .with_score(&score)
                             .apply_pp_score(&settings.pp_score_format)
                     })
                 } else {
-                    analyze_map(&beatmap.mods, path, songs_folder).map(|analysis| {
+                    analyze_map(beatmap).map(|analysis| {
                         placeholders
                             .with_pp(&analysis.pp)
                             .apply_pp(&settings.pp_format)
@@ -886,7 +883,7 @@ async fn get_user_id_from_access_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::osu::core::{BeatmapStatus, GameplayMods, ModInfo};
+    use crate::osu::core::{BeatmapStatus, GameplayMods, ModInfo, OsuClient};
 
     const MAP: &str = "osu file format v14
 
@@ -918,6 +915,7 @@ SliderTickRate:1
         std::fs::write(dir.join("map.osu"), MAP).unwrap();
 
         let beatmap = BeatmapData {
+            client: OsuClient::Lazer,
             id: 0,
             artist: "artist".to_string(),
             title: "title".to_string(),

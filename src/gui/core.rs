@@ -1058,14 +1058,7 @@ impl State {
                     self.osu_status = status.clone();
                 }
                 MemoryEvent::BeatmapChanged(beatmap) => {
-                    self.cached_map = beatmap.as_ref().and_then(|b| {
-                        analyze_map(
-                            &b.mods,
-                            b.osu_file_path.as_deref(),
-                            b.songs_folder.as_deref(),
-                        )
-                        .ok()
-                    });
+                    self.cached_map = beatmap.as_ref().and_then(|b| analyze_map(b).ok());
                     self.current_beatmap = beatmap;
                 }
                 MemoryEvent::BeatmapDataResponse(_) => {}
