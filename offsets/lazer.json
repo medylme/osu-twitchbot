@@ -10,7 +10,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 872
     },
     "osu_game": {
       "screen_stack": 1576,
@@ -68,6 +69,21 @@
     "ruleset_info": {
       "online_id": 48
     },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -91,7 +107,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 872
     },
     "osu_game": {
       "screen_stack": 1568,
@@ -148,6 +165,21 @@
     },
     "ruleset_info": {
       "online_id": 48
+    },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
     },
     "editor": {
       "api": 1096,
@@ -172,7 +204,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 872
     },
     "osu_game": {
       "screen_stack": 1568,
@@ -229,6 +262,21 @@
     },
     "ruleset_info": {
       "online_id": 48
+    },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
     },
     "editor": {
       "api": 1096,
@@ -253,7 +301,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 872
     },
     "osu_game": {
       "screen_stack": 1568,
@@ -311,6 +360,21 @@
     "ruleset_info": {
       "online_id": 48
     },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -334,7 +398,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 872
     },
     "osu_game": {
       "screen_stack": 1552,
@@ -391,6 +456,21 @@
     },
     "ruleset_info": {
       "online_id": 48
+    },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
     },
     "editor": {
       "api": 1096,
@@ -415,7 +495,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 872
     },
     "osu_game": {
       "screen_stack": 1552,
@@ -473,6 +554,21 @@
     "ruleset_info": {
       "online_id": 48
     },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -496,7 +592,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 872
     },
     "osu_game": {
       "screen_stack": 1544,
@@ -553,6 +650,21 @@
     },
     "ruleset_info": {
       "online_id": 48
+    },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
     },
     "editor": {
       "api": 1096,
@@ -577,7 +689,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 864
     },
     "osu_game": {
       "screen_stack": 1544,
@@ -634,6 +747,21 @@
     },
     "ruleset_info": {
       "online_id": 48
+    },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
     },
     "editor": {
       "api": 1096,
@@ -658,7 +786,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 864
     },
     "osu_game": {
       "screen_stack": 1544,
@@ -716,6 +845,21 @@
     "ruleset_info": {
       "online_id": 48
     },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -739,7 +883,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 864
     },
     "osu_game": {
       "screen_stack": 1536,
@@ -797,6 +942,21 @@
     "ruleset_info": {
       "online_id": 48
     },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 248,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -820,7 +980,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 864
     },
     "osu_game": {
       "screen_stack": 1528,
@@ -878,6 +1039,21 @@
     "ruleset_info": {
       "online_id": 48
     },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 240,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
+    },
     "editor": {
       "api": 1096,
       "realm": 960
@@ -900,7 +1076,8 @@
       "api": 536
     },
     "api_access": {
-      "game": 784
+      "game": 784,
+      "local_user_state": 864
     },
     "osu_game": {
       "screen_stack": 1528,
@@ -957,6 +1134,21 @@
     },
     "ruleset_info": {
       "online_id": 48
+    },
+    "local_user_state": {
+      "local_user": 512
+    },
+    "api_user": {
+      "id": 240,
+      "username": 8,
+      "statistics": 160
+    },
+    "user_statistics": {
+      "global_rank": 84,
+      "play_count": 56,
+      "accuracy": 40,
+      "level": 76,
+      "pp": 112
     },
     "editor": {
       "api": 1096,

@@ -26,8 +26,8 @@ use gui::core::{Message, State};
 use gui::theme::{ThemeOverride, get_current_theme, set_theme_override};
 use logging::{LogEntry, get_log_channel};
 use osu::core::{
-    BeatmapData, DetectedProcess, MemoryEvent, OsuClient, OsuCommand, OsuStatus,
-    detect_osu_processes,
+    BeatmapData, DetectedProcess, MemoryEvent, OsuClient, OsuCommand, OsuStatus, UserProfile,
+    detect_osu_processes, send_current_data,
 };
 use osu::lazer::run_lazer_reader;
 use osu::stable::run_stable_reader;
@@ -302,6 +302,7 @@ async fn osu_worker() {
     let mut forward_tx = get_osu_event_forward().0.clone();
 
     let mut current_beatmap: Option<BeatmapData> = None;
+    let mut current_profile: Option<UserProfile> = None;
     let mut failure_streak: Option<ReaderFailureStreak> = None;
 
     loop {
@@ -313,9 +314,8 @@ async fn osu_worker() {
             while let Ok(cmd) = cmd_rx.try_recv() {
                 match cmd {
                     OsuCommand::RequestBeatmapData => {
-                        let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
-                        let _ = tx.send(event.clone()).await;
-                        let _ = forward_tx.try_send(event);
+                        send_current_data(&current_beatmap, &current_profile, &tx, &forward_tx)
+                            .await;
                     }
                     OsuCommand::UpdateEventForwardSender(new_sender) => {
                         forward_tx = new_sender;
@@ -342,6 +342,7 @@ async fn osu_worker() {
                     &mut cmd_rx,
                     &mut forward_tx,
                     &mut current_beatmap,
+                    &mut current_profile,
                 )
                 .await
             }
@@ -353,6 +354,7 @@ async fn osu_worker() {
                     &mut cmd_rx,
                     &mut forward_tx,
                     &mut current_beatmap,
+                    &mut current_profile,
                 )
                 .await
             }
@@ -414,9 +416,14 @@ async fn osu_worker() {
         }
 
         current_beatmap = None;
-        let event = MemoryEvent::BeatmapChanged(None);
-        let _ = tx.send(event.clone()).await;
-        let _ = forward_tx.try_send(event);
+        current_profile = None;
+        for event in [
+            MemoryEvent::BeatmapChanged(None),
+            MemoryEvent::ProfileChanged(None),
+        ] {
+            let _ = tx.send(event.clone()).await;
+            let _ = forward_tx.try_send(event);
+        }
 
         let _ = tx
             .send(MemoryEvent::StatusChanged(OsuStatus::Disconnected))

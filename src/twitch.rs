@@ -11,7 +11,7 @@ use tokio::time::{self, Duration, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand};
+use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, UserProfile};
 use crate::osu::pp::{PpArgs, analyze_map, calculate_score_pp};
 use crate::placeholders::Placeholders;
 use crate::{log_debug, log_error, log_info, log_warn};
@@ -23,6 +23,9 @@ pub const DEFAULT_PP_COMMAND: &str = "!pp";
 pub const DEFAULT_PP_FORMAT: &str =
     "95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp ({mods})";
 pub const DEFAULT_PP_SCORE_FORMAT: &str = "{acc}% | {combo}x | {misses} miss | {pp}pp ({mods})";
+pub const DEFAULT_RANK_COMMAND: &str = "!rank";
+pub const DEFAULT_RANK_FORMAT: &str =
+    "{username}: #{rank} | {pp}pp | {acc}% | {playcount} plays | Lv. {level}";
 pub const DEFAULT_COOLDOWN_SECS: u64 = 1;
 const SOCKET_KEEPALIVE_SECONDS: u64 = 30;
 
@@ -80,7 +83,25 @@ pub struct ChatSettings {
     pub pp_command: String,
     pub pp_format: String,
     pub pp_score_format: String,
+    pub rank_command: String,
+    pub rank_format: String,
     pub cooldown_secs: u64,
+}
+
+impl ChatSettings {
+    fn command_type(&self, first_word: &str) -> Option<CommandType> {
+        [
+            (&self.np_command, CommandType::NowPlaying),
+            (&self.pp_command, CommandType::PerformancePoints),
+            (&self.rank_command, CommandType::Rank),
+        ]
+        .into_iter()
+        .find(|(command, _)| {
+            let command = command.trim();
+            !command.is_empty() && first_word.eq_ignore_ascii_case(command)
+        })
+        .map(|(_, command_type)| command_type)
+    }
 }
 
 impl Default for ChatSettings {
@@ -91,6 +112,8 @@ impl Default for ChatSettings {
             pp_command: DEFAULT_PP_COMMAND.to_string(),
             pp_format: DEFAULT_PP_FORMAT.to_string(),
             pp_score_format: DEFAULT_PP_SCORE_FORMAT.to_string(),
+            rank_command: DEFAULT_RANK_COMMAND.to_string(),
+            rank_format: DEFAULT_RANK_FORMAT.to_string(),
             cooldown_secs: DEFAULT_COOLDOWN_SECS,
         }
     }
@@ -107,6 +130,7 @@ pub enum TwitchEvent {
 enum CommandType {
     NowPlaying,
     PerformancePoints,
+    Rank,
 }
 
 impl Display for CommandType {
@@ -114,6 +138,7 @@ impl Display for CommandType {
         match self {
             CommandType::NowPlaying => write!(f, "np"),
             CommandType::PerformancePoints => write!(f, "pp"),
+            CommandType::Rank => write!(f, "rank"),
         }
     }
 }
@@ -403,6 +428,7 @@ impl TwitchClient {
         let mut last_message = Instant::now();
 
         let mut latest_beatmap: Option<BeatmapData> = None;
+        let mut latest_profile: Option<UserProfile> = None;
         let _ = osu_tx.send(OsuCommand::RequestBeatmapData).await;
 
         let mut last_command_time: Option<Instant> = None;
@@ -425,6 +451,7 @@ impl TwitchClient {
                                     if let Err(e) = self.handle_eventsub_message(
                                         &text,
                                         &latest_beatmap,
+                                        &latest_profile,
                                         &mut last_command_time,
                                     ).await {
                                         log_warn!("twitch", "Message error: {}", e);
@@ -477,10 +504,20 @@ impl TwitchClient {
                         | MemoryEvent::BeatmapChanged(beatmap) => {
                             latest_beatmap = beatmap;
                         }
-                        _ => {}
+                        MemoryEvent::ProfileChanged(profile) => {
+                            latest_profile = profile;
+                        }
+                        MemoryEvent::StatusChanged(_) => {}
                     }
                 }
             }
+        }
+    }
+
+    fn rank_reply(settings: &ChatSettings, profile: Option<&UserProfile>) -> String {
+        match profile {
+            Some(profile) => Placeholders::from_profile(profile).apply_rank(&settings.rank_format),
+            None => "Rank currently not available".to_string(),
         }
     }
 
@@ -503,6 +540,7 @@ impl TwitchClient {
 
                 placeholders.apply_np(&settings.np_format)
             }
+            CommandType::Rank => String::new(),
             CommandType::PerformancePoints => {
                 let args = PpArgs::parse(args);
                 let beatmap = &BeatmapData {
@@ -537,6 +575,7 @@ impl TwitchClient {
         &self,
         message: &str,
         latest_beatmap: &Option<BeatmapData>,
+        latest_profile: &Option<UserProfile>,
         last_command_time: &mut Option<Instant>,
     ) -> Result<(), BoxError> {
         let message: EventMessage = serde_json::from_str(message)?;
@@ -559,25 +598,11 @@ impl TwitchClient {
 
                     if let Some(event) = event_data {
                         let settings = self.settings.lock().await.clone();
-                        let np_command = settings.np_command.trim();
-                        let pp_command = settings.pp_command.trim();
                         let text = event.message.text.trim();
                         let (first_word, args) =
                             text.split_once(char::is_whitespace).unwrap_or((text, ""));
 
-                        let command_type = if !np_command.is_empty()
-                            && first_word.eq_ignore_ascii_case(np_command)
-                        {
-                            Some(CommandType::NowPlaying)
-                        } else if !pp_command.is_empty()
-                            && first_word.eq_ignore_ascii_case(pp_command)
-                        {
-                            Some(CommandType::PerformancePoints)
-                        } else {
-                            None
-                        };
-
-                        if let Some(cmd_type) = command_type {
+                        if let Some(cmd_type) = settings.command_type(first_word) {
                             let now = Instant::now();
 
                             let cooldown = Duration::from_secs(settings.cooldown_secs);
@@ -595,11 +620,14 @@ impl TwitchClient {
                                 event.chatter_user_name
                             );
 
-                            let reply = match latest_beatmap {
-                                Some(beatmap) => {
+                            let reply = match (&cmd_type, latest_beatmap) {
+                                (CommandType::Rank, _) => {
+                                    Self::rank_reply(&settings, latest_profile.as_ref())
+                                }
+                                (_, Some(beatmap)) => {
                                     Self::build_reply(&settings, &cmd_type, beatmap, args)
                                 }
-                                None => "No beatmap currently selected".to_string(),
+                                (_, None) => "No beatmap currently selected".to_string(),
                             };
 
                             if let Err(e) = self
@@ -946,6 +974,57 @@ SliderTickRate:1
 
         std::fs::remove_dir_all(&dir).unwrap();
         reply
+    }
+
+    #[test]
+    fn commands_match_their_first_word() {
+        let settings = ChatSettings {
+            rank_command: " !Rank ".to_string(),
+            ..ChatSettings::default()
+        };
+
+        assert_eq!(settings.command_type("!np"), Some(CommandType::NowPlaying));
+        assert_eq!(
+            settings.command_type("!PP"),
+            Some(CommandType::PerformancePoints)
+        );
+        assert_eq!(settings.command_type("!rank"), Some(CommandType::Rank));
+        assert_eq!(settings.command_type("!ranked"), None);
+    }
+
+    #[test]
+    fn an_empty_command_never_matches() {
+        let settings = ChatSettings {
+            rank_command: String::new(),
+            ..ChatSettings::default()
+        };
+
+        assert_eq!(settings.command_type(""), None);
+    }
+
+    #[test]
+    fn rank_needs_a_logged_in_player() {
+        let settings = ChatSettings {
+            rank_format: "{username} #{rank}".to_string(),
+            ..ChatSettings::default()
+        };
+        let profile = UserProfile {
+            username: "Player".to_string(),
+            rank: 1234,
+            pp: 0.0,
+            accuracy: 0.0,
+            play_count: 0,
+            level: 1,
+        };
+
+        assert_eq!(
+            TwitchClient::rank_reply(&settings, Some(&profile)),
+            "Player #1,234"
+        );
+        assert_eq!(
+            TwitchClient::rank_reply(&settings, None),
+            "Rank currently not available"
+        );
     }
 
     #[test]

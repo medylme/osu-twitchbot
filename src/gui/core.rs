@@ -19,15 +19,16 @@ use super::components::{
 use super::theme::{ColorPalette, get_current_theme, palette};
 use crate::credentials::CredentialStore;
 use crate::logging::{LogEntry, LogLevel};
-use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus};
+use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand, OsuStatus, UserProfile};
 use crate::osu::pp::{MapAnalysis, MapStats, analyze_map};
-use crate::placeholders::Placeholders;
+use crate::placeholders::{Placeholders, grouped};
 use crate::preferences::PreferencesStore;
 use crate::tray::{TrayEvent, TrayStatus};
 use crate::twitch::{
     ChatSettings, DEFAULT_COOLDOWN_SECS, DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND,
-    DEFAULT_PP_FORMAT, DEFAULT_PP_SCORE_FORMAT, INVALID_ACCESS_TOKEN_STATUS, TwitchCommand,
-    TwitchEvent, TwitchStatus, is_invalid_access_token_error, is_transient_network_error,
+    DEFAULT_PP_FORMAT, DEFAULT_PP_SCORE_FORMAT, DEFAULT_RANK_COMMAND, DEFAULT_RANK_FORMAT,
+    INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
+    is_invalid_access_token_error, is_transient_network_error,
 };
 use crate::{
     MAX_WINDOW_SIZE, MIN_WINDOW_SIZE, VERSION, get_osu_channel, get_tray_status_channel,
@@ -65,6 +66,10 @@ pub enum Message {
     ResetPpFormat,
     PpScoreFormatChanged(String),
     ResetPpScoreFormat,
+    RankCommandChanged(String),
+    RankFormatChanged(String),
+    ResetRankCommand,
+    ResetRankFormat,
     CooldownChanged(String),
     ResetCooldown,
     OsuEvent(MemoryEvent),
@@ -95,6 +100,7 @@ pub struct State {
     cooldown_input: String,
     current_beatmap: Option<BeatmapData>,
     cached_map: Option<MapAnalysis>,
+    profile: Option<UserProfile>,
     placeholder_copied: bool,
     placeholder_copies: u64,
     osu_status: OsuStatus,
@@ -157,6 +163,7 @@ impl State {
             chat,
             current_beatmap: None,
             cached_map: None,
+            profile: None,
             placeholder_copied: false,
             placeholder_copies: 0,
             osu_status: OsuStatus::default(),
@@ -540,6 +547,27 @@ impl State {
             ),
         );
 
+        let rank_placeholders = self
+            .profile
+            .as_ref()
+            .map(Placeholders::from_profile)
+            .unwrap_or_else(Placeholders::sample_rank);
+
+        let rank_section = self.command_format_section(
+            p,
+            "Rank",
+            &self.chat.rank_command,
+            DEFAULT_RANK_COMMAND,
+            Message::RankCommandChanged,
+            Message::ResetRankCommand,
+            &self.chat.rank_format,
+            DEFAULT_RANK_FORMAT,
+            Message::RankFormatChanged,
+            Message::ResetRankFormat,
+            "Placeholders: {username} {rank} {pp} {acc} {playcount} {level}",
+            self.chat_preview(p, rank_placeholders.apply_rank(&self.chat.rank_format)),
+        );
+
         let cooldown_input = text_input("1", &self.cooldown_input)
             .size(13)
             .padding([8, 12])
@@ -567,7 +595,8 @@ impl State {
         let commands_content = column![
             global_section,
             np_section,
-            column![pp_section, pp_score_format].spacing(10)
+            column![pp_section, pp_score_format].spacing(10),
+            rank_section,
         ]
         .spacing(24)
         .padding([22, 24]);
@@ -753,11 +782,60 @@ impl State {
             None => (unavailable(), unavailable()),
         };
 
+        let profile_card_body: Element<'a, Message> = match &self.profile {
+            Some(profile) => {
+                let rank = match profile.rank {
+                    0 => "?".to_string(),
+                    rank => grouped(u64::from(rank)),
+                };
+
+                column![
+                    row![cell(
+                        "Player",
+                        "{username}",
+                        profile.username.clone(),
+                        "",
+                        false
+                    )],
+                    row![
+                        cell("Rank", "{rank}", format!("#{rank}"), "", true),
+                        cell(
+                            "PP",
+                            "{pp}",
+                            grouped(profile.pp.round() as u64),
+                            "pp",
+                            false
+                        ),
+                        cell(
+                            "Accuracy",
+                            "{acc}",
+                            format!("{:.2}", profile.accuracy),
+                            "%",
+                            false
+                        ),
+                        cell(
+                            "Play count",
+                            "{playcount}",
+                            grouped(u64::from(profile.play_count)),
+                            "",
+                            false
+                        ),
+                        cell("Level", "{level}", profile.level.to_string(), "", false),
+                    ]
+                    .spacing(10),
+                ]
+                .spacing(12)
+                .into()
+            }
+            None => text("Not logged in").size(12).color(p.text_muted).into(),
+        };
+
         let content = column![
             header,
             details,
             card("Map Stats", stats_card_body),
             card("Performance Points", pp_card_body),
+            card("Profile", profile_card_body),
         ]
         .spacing(16)
         .padding([22, 24]);
@@ -849,9 +927,7 @@ impl State {
             _ => "bot".to_string(),
         };
 
-        let cap = text("Preview · what chat sees")
-            .size(10)
-            .color(p.text_muted);
+        let cap = text("Preview").size(10).color(p.text_muted);
         let line = rich_text![
             span::<String, Font>(who)
                 .color(p.accent_alt)
@@ -1078,6 +1154,22 @@ impl State {
                 self.chat.pp_score_format = DEFAULT_PP_SCORE_FORMAT.to_string();
                 self.chat_settings_changed();
             }
+            Message::RankCommandChanged(value) => {
+                self.chat.rank_command = value;
+                self.chat_settings_changed();
+            }
+            Message::RankFormatChanged(value) => {
+                self.chat.rank_format = value;
+                self.chat_settings_changed();
+            }
+            Message::ResetRankCommand => {
+                self.chat.rank_command = DEFAULT_RANK_COMMAND.to_string();
+                self.chat_settings_changed();
+            }
+            Message::ResetRankFormat => {
+                self.chat.rank_format = DEFAULT_RANK_FORMAT.to_string();
+                self.chat_settings_changed();
+            }
             Message::CooldownChanged(value) => {
                 self.cooldown_input = value.chars().filter(char::is_ascii_digit).take(4).collect();
                 if let Ok(secs) = self.cooldown_input.parse() {
@@ -1110,6 +1202,9 @@ impl State {
                     self.current_beatmap = beatmap;
                 }
                 MemoryEvent::BeatmapDataResponse(_) => {}
+                MemoryEvent::ProfileChanged(profile) => {
+                    self.profile = profile;
+                }
             },
             Message::TwitchEvent(event) => match event {
                 TwitchEvent::Connected(ref username) => {

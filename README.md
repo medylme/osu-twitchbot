@@ -108,6 +108,25 @@ Default:
 {acc}% | {combo}x | {misses} miss | {pp}pp ({mods})
 ```
 
+### Rank
+
+Replies with the profile of the player logged in to osu!, read from the game itself.
+
+| Placeholder   | Description |
+| ------------- | ----------- |
+| `{username}`  | Username    |
+| `{rank}`      | Global rank |
+| `{pp}`        | Total PP    |
+| `{acc}`       | Accuracy    |
+| `{playcount}` | Play count  |
+| `{level}`     | Level       |
+
+Default:
+
+```
+{username}: #{rank} | {pp}pp | {acc}% | {playcount} plays | Lv. {level}
+```
+
 ## File Locations
 
 Settings are stored as `settings.toml`; logs are written to a `latest.log` (truncated each run) alongside timestamped archives. The Console tab has **Open Logs Folder** and **Open Config Folder** buttons.

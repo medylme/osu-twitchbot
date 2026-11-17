@@ -8,8 +8,8 @@ use tokio::time::{self, Duration};
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
-    OsuStatus, ProcessMemory, known_ruleset, order_mods, parse_pattern, privilege_hint,
-    rate_mod_default,
+    OsuStatus, ProcessMemory, UserProfile, decimal_to_f64, known_ruleset, order_mods,
+    parse_pattern, privilege_hint, publish_profile, rate_mod_default, send_current_data,
 };
 use crate::{log_debug, log_info, log_warn};
 
@@ -31,6 +31,7 @@ pub async fn run_lazer_reader(
     cmd_rx: &mut mpsc::Receiver<OsuCommand>,
     forward_tx: &mut mpsc::Sender<MemoryEvent>,
     current_beatmap: &mut Option<BeatmapData>,
+    current_profile: &mut Option<UserProfile>,
 ) -> Result<(), MemoryError> {
     log_debug!(
         "memory-lazer",
@@ -105,14 +106,15 @@ pub async fn run_lazer_reader(
                     let mut r = reader.clone();
                     tokio::task::spawn_blocking(move || {
                         let res = r.read_beatmap();
-                        (res, r.mod_vtable_map)
+                        (res, r.read_profile(), r.mod_vtable_map)
                     })
                     .await
                 };
 
                 match result {
-                    Ok((Ok(beatmap), vtable_map)) => {
+                    Ok((Ok(beatmap), profile, vtable_map)) => {
                         consecutive_failures = 0;
+                        publish_profile(profile, current_profile, tx, forward_tx).await;
                         if reader.mod_vtable_map.is_empty() && !vtable_map.is_empty() {
                             reader.mod_vtable_map = vtable_map;
                         }
@@ -124,7 +126,7 @@ pub async fn run_lazer_reader(
                             let _ = forward_tx.try_send(event);
                         }
                     }
-                    Ok((Err(e), _)) => {
+                    Ok((Err(e), _, _)) => {
                         if matches!(e, MemoryError::ProcessNotFound | MemoryError::AccessDenied) {
                             return Err(e);
                         }
@@ -150,9 +152,7 @@ pub async fn run_lazer_reader(
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     OsuCommand::RequestBeatmapData => {
-                        let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
-                        let _ = tx.send(event.clone()).await;
-                        let _ = forward_tx.try_send(event);
+                        send_current_data(current_beatmap, current_profile, tx, forward_tx).await;
                     }
                     OsuCommand::UpdateEventForwardSender(new_sender) => {
                         *forward_tx = new_sender;
@@ -189,6 +189,12 @@ struct Offsets {
     #[serde(default)]
     ruleset_info: RulesetInfoOffsets,
     #[serde(default)]
+    local_user_state: LocalUserStateOffsets,
+    #[serde(default)]
+    api_user: ApiUserOffsets,
+    #[serde(default)]
+    user_statistics: UserStatisticsOffsets,
+    #[serde(default)]
     editor: EditorOffsets,
     #[serde(default)]
     results_screen: ResultsScreenOffsets,
@@ -216,6 +222,8 @@ struct ExternalLinkOpener {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct ApiAccess {
     game: usize,
+    #[serde(default)]
+    local_user_state: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -256,6 +264,27 @@ struct SubmittingPlayer {
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 struct RulesetInfoOffsets {
     online_id: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct LocalUserStateOffsets {
+    local_user: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct ApiUserOffsets {
+    id: usize,
+    username: usize,
+    statistics: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct UserStatisticsOffsets {
+    global_rank: usize,
+    play_count: usize,
+    accuracy: usize,
+    level: usize,
+    pp: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -684,6 +713,65 @@ impl LazerReader {
         self.screens()
             .into_iter()
             .any(|screen| self.is_editor_screen(screen))
+    }
+
+    pub fn read_profile(&self) -> Option<UserProfile> {
+        let o = &self.offsets;
+        let process = &self.process;
+        let user_offsets = &o.api_user;
+        let stats_offsets = &o.user_statistics;
+
+        let offsets = [
+            o.osu_game_base.api,
+            o.api_access.local_user_state,
+            o.local_user_state.local_user,
+            user_offsets.id,
+            user_offsets.username,
+            user_offsets.statistics,
+        ];
+        if offsets.contains(&0) {
+            return None;
+        }
+
+        let follow = |addr: usize| process.read_ptr(addr).ok().filter(|ptr| *ptr != 0);
+
+        let api = follow(self.game_base + o.osu_game_base.api)?;
+        let local_user_state = follow(api + o.api_access.local_user_state)?;
+        let bindable = follow(local_user_state + o.local_user_state.local_user)?;
+        let user = follow(bindable + 0x20)?;
+
+        // 0 guest user // 1 system user
+        if process.read_i32(user + user_offsets.id).ok()? <= 1 {
+            return None;
+        }
+
+        let username = read_csharp_string(process, user + user_offsets.username).ok()?;
+        if username.is_empty() {
+            return None;
+        }
+
+        let statistics = follow(user + user_offsets.statistics)?;
+        let read_count = |offset: usize| {
+            let value = process.read_i32(statistics + offset).ok()?;
+            Some(u32::try_from(value).unwrap_or(0))
+        };
+
+        // nullable values keep their flag first and the value after it
+        let pp = statistics + stats_offsets.pp + 0x8;
+        let pp = decimal_to_f64(
+            process.read_u32(pp).ok()?,
+            process.read_u32(pp + 0x4).ok()?,
+            process.read_u64(pp + 0x8).ok()?,
+        );
+
+        Some(UserProfile {
+            username,
+            rank: read_count(stats_offsets.global_rank + 0x4)?,
+            pp,
+            accuracy: process.read_f64(statistics + stats_offsets.accuracy).ok()?,
+            play_count: read_count(stats_offsets.play_count)?,
+            level: read_count(stats_offsets.level)?,
+        })
     }
 
     fn read_ruleset(&self) -> Option<u8> {
@@ -1230,6 +1318,29 @@ mod tests {
         for (version, o) in &offsets {
             assert_ne!(o.osu_game_base.ruleset, 0, "{version}");
             assert_ne!(o.ruleset_info.online_id, 0, "{version}");
+        }
+    }
+
+    #[test]
+    fn every_version_has_the_profile_offsets() {
+        let offsets: HashMap<String, Offsets> =
+            serde_json::from_str(include_str!("../../offsets/lazer.json")).unwrap();
+
+        for (version, o) in &offsets {
+            let profile_offsets = [
+                o.api_access.local_user_state,
+                o.local_user_state.local_user,
+                o.api_user.id,
+                o.api_user.username,
+                o.api_user.statistics,
+                o.user_statistics.global_rank,
+                o.user_statistics.play_count,
+                o.user_statistics.accuracy,
+                o.user_statistics.level,
+                o.user_statistics.pp,
+            ];
+
+            assert!(!profile_offsets.contains(&0), "{version}");
         }
     }
 

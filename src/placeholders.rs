@@ -1,4 +1,4 @@
-use crate::osu::core::BeatmapData;
+use crate::osu::core::{BeatmapData, UserProfile};
 use crate::osu::pp::{MapStats, PpValues, ScorePp, decimal_text};
 
 const STAT_PLACEHOLDERS: [&str; 9] = [
@@ -47,6 +47,25 @@ pub struct Placeholders {
     pub combo: Option<String>,
     pub misses: Option<String>,
     pub pp: Option<String>,
+
+    pub username: Option<String>,
+    pub rank: Option<String>,
+    pub playcount: Option<String>,
+    pub level: Option<String>,
+}
+
+pub fn grouped(value: u64) -> String {
+    let digits = value.to_string();
+    let mut text = String::new();
+
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+
+    text
 }
 
 impl Placeholders {
@@ -75,6 +94,45 @@ impl Placeholders {
             state: Some(beatmap.state.to_string()),
             ..Default::default()
         }
+    }
+
+    pub fn from_profile(profile: &UserProfile) -> Self {
+        let rank = match profile.rank {
+            0 => STAT_UNAVAILABLE.to_string(),
+            rank => grouped(u64::from(rank)),
+        };
+
+        Self {
+            username: Some(profile.username.clone()),
+            rank: Some(rank),
+            pp: Some(grouped(profile.pp.round() as u64)),
+            acc: Some(decimal_text(profile.accuracy, 2)),
+            playcount: Some(grouped(u64::from(profile.play_count))),
+            level: Some(profile.level.to_string()),
+            ..Default::default()
+        }
+    }
+
+    pub fn sample_rank() -> Self {
+        Self::from_profile(&UserProfile {
+            username: "Player".to_string(),
+            rank: 12345,
+            pp: 8123.0,
+            accuracy: 98.76,
+            play_count: 54321,
+            level: 100,
+        })
+    }
+
+    pub fn apply_rank(&self, format: &str) -> String {
+        let mut result = format.to_string();
+        Self::replace(&mut result, "{username}", &self.username);
+        Self::replace(&mut result, "{rank}", &self.rank);
+        Self::replace(&mut result, "{pp}", &self.pp);
+        Self::replace(&mut result, "{acc}", &self.acc);
+        Self::replace(&mut result, "{playcount}", &self.playcount);
+        Self::replace(&mut result, "{level}", &self.level);
+        Self::trim(result)
     }
 
     pub fn uses_stats(format: &str) -> bool {
@@ -281,6 +339,41 @@ mod tests {
         let placeholders = Placeholders::default().with_stats(None);
 
         assert_eq!(placeholders.apply_np("{stars}* {bpm}bpm"), "?* ?bpm");
+    }
+
+    #[test]
+    fn numbers_are_grouped_by_thousands() {
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(1000), "1,000");
+        assert_eq!(grouped(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn profile_fills_the_rank_format() {
+        let placeholders = Placeholders::sample_rank();
+
+        assert_eq!(
+            placeholders.apply_rank("{username} #{rank} {pp}pp {acc}% {playcount} plays lv{level}"),
+            "Player #12,345 8,123pp 98.76% 54,321 plays lv100"
+        );
+    }
+
+    #[test]
+    fn an_unranked_profile_has_no_rank() {
+        let profile = UserProfile {
+            username: "Player".to_string(),
+            rank: 0,
+            pp: 0.0,
+            accuracy: 0.0,
+            play_count: 0,
+            level: 1,
+        };
+
+        assert_eq!(
+            Placeholders::from_profile(&profile).apply_rank("#{rank}"),
+            "#?"
+        );
     }
 
     #[test]

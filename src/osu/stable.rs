@@ -7,7 +7,8 @@ use tokio::time::{self, Duration};
 use super::core::{
     BeatmapData, BeatmapStatus, DATA_POLLING_INTERVAL_MS, GameState, GameplayMods,
     MAX_CONSECUTIVE_READ_FAILURES, MemoryError, MemoryEvent, ModInfo, OsuClient, OsuCommand,
-    OsuStatus, ProcessMemory, known_ruleset, order_mods, parse_pattern, privilege_hint,
+    OsuStatus, ProcessMemory, UserProfile, known_ruleset, order_mods, parse_pattern,
+    privilege_hint, publish_profile, send_current_data,
 };
 use crate::{log_debug, log_warn};
 
@@ -18,6 +19,7 @@ pub async fn run_stable_reader(
     cmd_rx: &mut mpsc::Receiver<OsuCommand>,
     forward_tx: &mut mpsc::Sender<MemoryEvent>,
     current_beatmap: &mut Option<BeatmapData>,
+    current_profile: &mut Option<UserProfile>,
 ) -> Result<(), MemoryError> {
     log_debug!(
         "memory-stable",
@@ -55,18 +57,20 @@ pub async fn run_stable_reader(
                     let mut reader = reader.clone();
                     let songs_folder = songs_folder.clone();
                     tokio::task::spawn_blocking(move || {
-                        reader.read_beatmap().map(|mut beatmap| {
+                        let beatmap = reader.read_beatmap().map(|mut beatmap| {
                             beatmap.songs_folder = songs_folder;
                             beatmap.stamp_file();
                             beatmap
-                        })
+                        });
+                        (beatmap, reader.read_profile())
                     })
                     .await
                 };
 
                 match result {
-                    Ok(Ok(beatmap)) => {
+                    Ok((Ok(beatmap), profile)) => {
                         consecutive_failures = 0;
+                        publish_profile(profile, current_profile, tx, forward_tx).await;
 
                         if current_beatmap.as_ref() != Some(&beatmap) {
                             *current_beatmap = Some(beatmap.clone());
@@ -75,7 +79,7 @@ pub async fn run_stable_reader(
                             let _ = forward_tx.try_send(event);
                         }
                     }
-                    Ok(Err(e)) => {
+                    Ok((Err(e), _)) => {
                         if matches!(e, MemoryError::ProcessNotFound | MemoryError::AccessDenied) {
                             return Err(e);
                         }
@@ -101,9 +105,7 @@ pub async fn run_stable_reader(
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     OsuCommand::RequestBeatmapData => {
-                        let event = MemoryEvent::BeatmapDataResponse(current_beatmap.clone());
-                        let _ = tx.send(event.clone()).await;
-                        let _ = forward_tx.try_send(event);
+                        send_current_data(current_beatmap, current_profile, tx, forward_tx).await;
                     }
                     OsuCommand::UpdateEventForwardSender(new_sender) => {
                         *forward_tx = new_sender;
@@ -122,6 +124,20 @@ struct Offsets {
     ruleset: RulesetOffsets,
     status: StatusOffsets,
     menu_mods: MenuModsOffsets,
+    #[serde(default)]
+    user_profile: UserProfileOffsets,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+struct UserProfileOffsets {
+    ptr_offset: usize,
+    accuracy: usize,
+    username: usize,
+    user_id: usize,
+    level: usize,
+    play_count: usize,
+    rank: usize,
+    pp: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -129,6 +145,8 @@ struct Patterns {
     base: String,
     ruleset: String,
     menu_mods: String,
+    #[serde(default)]
+    user_profile: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -202,6 +220,7 @@ pub struct StableReader {
     base_addr: usize,
     ruleset_addr: usize,
     menu_mods_addr: usize,
+    user_profile_addr: Option<usize>,
 }
 
 impl StableReader {
@@ -235,12 +254,63 @@ impl StableReader {
             menu_mods_addr
         );
 
+        // optional block for rank command
+        let user_profile_addr = if offsets.patterns.user_profile.is_empty() {
+            None
+        } else {
+            let (pattern, mask) = parse_pattern(&offsets.patterns.user_profile);
+            process
+                .pattern_scan(&pattern, &mask, Some(0x1_0000_0000))
+                .inspect_err(|e| {
+                    log_debug!("memory-stable", "User profile pattern not found: {}", e);
+                })
+                .ok()
+        };
+
         Ok(Self {
             offsets,
             process: Arc::new(process),
             base_addr,
             ruleset_addr,
             menu_mods_addr,
+            user_profile_addr,
+        })
+    }
+
+    pub fn read_profile(&self) -> Option<UserProfile> {
+        let o = &self.offsets.user_profile;
+        let process = &self.process;
+
+        let profile_ptr = process
+            .read_ptr32(self.user_profile_addr? + o.ptr_offset)
+            .ok()?;
+        if profile_ptr == 0 {
+            return None;
+        }
+
+        let profile = process.read_ptr32(profile_ptr).ok()?;
+
+        if profile == 0 || process.read_i32(profile + o.user_id).ok()? <= 0 {
+            return None;
+        }
+
+        let username = read_stable_string(process, profile + o.username).ok()?;
+        if username.is_empty() {
+            return None;
+        }
+
+        let read_count = |offset: usize| {
+            let value = process.read_i32(profile + offset).ok()?;
+            Some(u32::try_from(value).unwrap_or(0))
+        };
+
+        Some(UserProfile {
+            username,
+            rank: read_count(o.rank)?,
+            pp: f64::from(read_count(o.pp)?),
+            accuracy: process.read_f64(profile + o.accuracy).ok()?,
+            play_count: read_count(o.play_count)?,
+            level: process.read_f32(profile + o.level).ok()? as u32,
         })
     }
 

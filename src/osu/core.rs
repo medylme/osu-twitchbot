@@ -22,6 +22,7 @@ pub enum MemoryEvent {
     StatusChanged(OsuStatus),
     BeatmapChanged(Option<BeatmapData>),
     BeatmapDataResponse(Option<BeatmapData>),
+    ProfileChanged(Option<UserProfile>),
 }
 
 #[derive(Debug)]
@@ -111,6 +112,60 @@ impl Display for BeatmapStatus {
             BeatmapStatus::StablePending => write!(f, "Pending/Graveyard"),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserProfile {
+    pub username: String,
+    pub rank: u32, // 0 when unranked
+    pub pp: f64,
+    pub accuracy: f64,
+    pub play_count: u32,
+    pub level: u32,
+}
+
+// .NET decimal (96-bit integer scaled down by a power of ten)
+pub fn decimal_to_f64(flags: u32, hi: u32, lo: u64) -> f64 {
+    let scale = (flags >> 16) & 0xff;
+    let magnitude = f64::from(hi) * 2f64.powi(64) + lo as f64;
+    let value = magnitude / 10f64.powi(scale as i32);
+
+    if flags & 0x8000_0000 == 0 {
+        value
+    } else {
+        -value
+    }
+}
+
+pub async fn send_current_data(
+    beatmap: &Option<BeatmapData>,
+    profile: &Option<UserProfile>,
+    tx: &mpsc::Sender<MemoryEvent>,
+    forward_tx: &mpsc::Sender<MemoryEvent>,
+) {
+    for event in [
+        MemoryEvent::BeatmapDataResponse(beatmap.clone()),
+        MemoryEvent::ProfileChanged(profile.clone()),
+    ] {
+        let _ = tx.send(event.clone()).await;
+        let _ = forward_tx.try_send(event);
+    }
+}
+
+pub async fn publish_profile(
+    profile: Option<UserProfile>,
+    current: &mut Option<UserProfile>,
+    tx: &mpsc::Sender<MemoryEvent>,
+    forward_tx: &mpsc::Sender<MemoryEvent>,
+) {
+    if *current == profile {
+        return;
+    }
+
+    current.clone_from(&profile);
+    let event = MemoryEvent::ProfileChanged(profile);
+    let _ = tx.send(event.clone()).await;
+    let _ = forward_tx.try_send(event);
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -355,6 +410,21 @@ impl ProcessMemory {
     pub fn read_f64(&self, addr: usize) -> Result<f64, MemoryError> {
         let bytes = self.read_bytes(addr, 8)?;
         Ok(f64::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    pub fn read_f32(&self, addr: usize) -> Result<f32, MemoryError> {
+        let bytes = self.read_bytes(addr, 4)?;
+        Ok(f32::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    pub fn read_u32(&self, addr: usize) -> Result<u32, MemoryError> {
+        let bytes = self.read_bytes(addr, 4)?;
+        Ok(u32::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    pub fn read_u64(&self, addr: usize) -> Result<u64, MemoryError> {
+        let bytes = self.read_bytes(addr, 8)?;
+        Ok(u64::from_le_bytes(bytes.try_into().unwrap()))
     }
 
     pub fn pattern_scan(
@@ -877,6 +947,14 @@ mod tests {
         assert_eq!(GameState::from_stable_status(5), GameState::SongSelect);
         assert_eq!(GameState::from_stable_status(7), GameState::Results);
         assert_eq!(GameState::from_stable_status(11), GameState::Idle);
+    }
+
+    #[test]
+    fn decimals_are_scaled_and_signed() {
+        assert_eq!(decimal_to_f64(0, 0, 8123), 8123.0);
+        assert_eq!(decimal_to_f64(2 << 16, 0, 812_345), 8123.45);
+        assert_eq!(decimal_to_f64(0x8000_0000 | (1 << 16), 0, 15), -1.5);
+        assert_eq!(decimal_to_f64(0, 1, 0), 2f64.powi(64));
     }
 
     #[test]
