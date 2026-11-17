@@ -78,6 +78,7 @@ pub enum Message {
     LinkClicked(String),
     CopyPlaceholder(&'static str),
     PlaceholderCopyExpired(u64),
+    MapAnalyzed(u64, Option<MapAnalysis>),
     OpenLogsClicked,
     OpenConfigClicked,
     WindowOpened(window::Id),
@@ -100,6 +101,7 @@ pub struct State {
     cooldown_input: String,
     current_beatmap: Option<BeatmapData>,
     cached_map: Option<MapAnalysis>,
+    map_analyses: u64,
     profile: Option<UserProfile>,
     placeholder_copied: bool,
     placeholder_copies: u64,
@@ -163,6 +165,7 @@ impl State {
             chat,
             current_beatmap: None,
             cached_map: None,
+            map_analyses: 0,
             profile: None,
             placeholder_copied: false,
             placeholder_copies: 0,
@@ -981,6 +984,26 @@ impl State {
             .try_send(TwitchCommand::UpdateSettings(self.chat.clone()));
     }
 
+    fn analyze_current_map(&mut self) -> Task<Message> {
+        self.map_analyses += 1;
+        let analysis = self.map_analyses;
+
+        let Some(beatmap) = self.current_beatmap.clone() else {
+            self.cached_map = None;
+            return Task::none();
+        };
+
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || analyze_map(&beatmap).ok())
+                    .await
+                    .ok()
+                    .flatten()
+            },
+            move |result| Message::MapAnalyzed(analysis, result),
+        )
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         self.sync_tray();
@@ -1198,8 +1221,8 @@ impl State {
                     self.osu_status = status.clone();
                 }
                 MemoryEvent::BeatmapChanged(beatmap) => {
-                    self.cached_map = beatmap.as_ref().and_then(|b| analyze_map(b).ok());
                     self.current_beatmap = beatmap;
+                    return self.analyze_current_map();
                 }
                 MemoryEvent::BeatmapDataResponse(_) => {}
                 MemoryEvent::ProfileChanged(profile) => {
@@ -1249,6 +1272,11 @@ impl State {
                         Message::PlaceholderCopyExpired(copy)
                     }),
                 ]);
+            }
+            Message::MapAnalyzed(analysis, result) => {
+                if analysis == self.map_analyses {
+                    self.cached_map = result;
+                }
             }
             Message::PlaceholderCopyExpired(copy) => {
                 if copy == self.placeholder_copies {

@@ -625,7 +625,17 @@ impl TwitchClient {
                                     Self::rank_reply(&settings, latest_profile.as_ref())
                                 }
                                 (_, Some(beatmap)) => {
-                                    Self::build_reply(&settings, &cmd_type, beatmap, args)
+                                    let (settings, beatmap, args) =
+                                        (settings.clone(), beatmap.clone(), args.to_string());
+
+                                    tokio::task::spawn_blocking(move || {
+                                        Self::build_reply(&settings, &cmd_type, &beatmap, &args)
+                                    })
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        log_warn!("twitch", "Failed to build reply: {}", e);
+                                        "Beatmap info currently not available".to_string()
+                                    })
                                 }
                                 (_, None) => "No beatmap currently selected".to_string(),
                             };

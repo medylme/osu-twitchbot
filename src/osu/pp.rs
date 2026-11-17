@@ -1,7 +1,11 @@
+use std::collections::VecDeque;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use rosu_mods::serde::GameModSeed;
 use rosu_mods::{Acronym, GameMod, GameModIntermode, GameMode, GameMods};
+use rosu_pp::any::DifficultyAttributes;
 use rosu_pp::model::hit_object::HitObjectKind;
 use rosu_pp::model::mode::GameMode as MapMode;
 use rosu_pp::{Beatmap, Difficulty, Performance};
@@ -291,7 +295,63 @@ fn difficulty_for(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuCli
         .lazer(client == OsuClient::Lazer)
 }
 
-fn analyze(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) -> MapAnalysis {
+struct RatedMap {
+    difficulty: Difficulty,
+    attributes: DifficultyAttributes,
+    objects: u32,
+    analysis: MapAnalysis,
+}
+
+#[derive(PartialEq)]
+struct RatedMapKey {
+    osu_file_path: Option<String>,
+    songs_folder: Option<String>,
+    file_stamp: Option<(SystemTime, u64)>,
+    mods: Option<GameplayMods>,
+    ruleset: Option<u8>,
+    client: OsuClient,
+}
+
+impl RatedMapKey {
+    fn new(data: &BeatmapData) -> Self {
+        Self {
+            osu_file_path: data.osu_file_path.clone(),
+            songs_folder: data.songs_folder.clone(),
+            file_stamp: data.file_stamp,
+            mods: data.mods.clone(),
+            ruleset: data.ruleset,
+            client: data.client,
+        }
+    }
+}
+
+const RATED_MAP_CACHE_SIZE: usize = 4;
+
+static RATED_MAPS: Mutex<VecDeque<(RatedMapKey, Arc<RatedMap>)>> = Mutex::new(VecDeque::new());
+
+fn rated_map(data: &BeatmapData) -> Result<Arc<RatedMap>, PpError> {
+    let key = RatedMapKey::new(data);
+
+    if let Ok(cache) = RATED_MAPS.lock()
+        && let Some((_, rated)) = cache.iter().find(|(cached, _)| *cached == key)
+    {
+        return Ok(Arc::clone(rated));
+    }
+
+    let beatmap = parse_beatmap(data)?;
+    let rated = Arc::new(rate(&beatmap, &data.mods, data.client));
+
+    if (data.client == OsuClient::Lazer || data.file_stamp.is_some())
+        && let Ok(mut cache) = RATED_MAPS.lock()
+    {
+        cache.push_front((key, Arc::clone(&rated)));
+        cache.truncate(RATED_MAP_CACHE_SIZE);
+    }
+
+    Ok(rated)
+}
+
+fn rate(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) -> RatedMap {
     let difficulty = difficulty_for(beatmap, mods, client);
     let attributes = difficulty.calculate(beatmap);
 
@@ -324,7 +384,7 @@ fn analyze(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) ->
             .pp()
     };
 
-    MapAnalysis {
+    let analysis = MapAnalysis {
         stats,
         pp: PpValues {
             pp_95: pp_at(95.0),
@@ -333,20 +393,19 @@ fn analyze(beatmap: &Beatmap, mods: &Option<GameplayMods>, client: OsuClient) ->
             pp_99: pp_at(99.0),
             pp_100: pp_at(100.0),
         },
+    };
+
+    RatedMap {
+        objects: u32::try_from(beatmap.hit_objects.len()).unwrap_or(u32::MAX),
+        difficulty,
+        attributes,
+        analysis,
     }
 }
 
-fn score_pp(
-    beatmap: &Beatmap,
-    mods: &Option<GameplayMods>,
-    client: OsuClient,
-    args: &PpArgs,
-) -> ScorePp {
-    let difficulty = difficulty_for(beatmap, mods, client);
-    let attributes = difficulty.calculate(beatmap);
-
-    let max_combo = attributes.max_combo();
-    let objects = u32::try_from(beatmap.hit_objects.len()).unwrap_or(u32::MAX);
+fn score_pp(rated: &RatedMap, args: &PpArgs) -> ScorePp {
+    let max_combo = rated.attributes.max_combo();
+    let objects = rated.objects;
     let misses = args.misses.unwrap_or(0).min(objects);
     let combo = args.combo.unwrap_or(max_combo).min(max_combo);
 
@@ -359,8 +418,8 @@ fn score_pp(
         }
     });
 
-    let pp = Performance::new(attributes)
-        .difficulty(difficulty)
+    let pp = Performance::new(rated.attributes.clone())
+        .difficulty(rated.difficulty.clone())
         .accuracy(accuracy)
         .combo(combo)
         .misses(misses)
@@ -408,20 +467,17 @@ fn parse_beatmap(data: &BeatmapData) -> Result<Beatmap, PpError> {
 }
 
 pub fn calculate_score_pp(data: &BeatmapData, args: &PpArgs) -> Result<ScorePp, PpError> {
-    let beatmap = parse_beatmap(data)?;
-
-    Ok(score_pp(&beatmap, &data.mods, data.client, args))
+    Ok(score_pp(&*rated_map(data)?, args))
 }
 
 pub fn analyze_map(data: &BeatmapData) -> Result<MapAnalysis, PpError> {
-    let beatmap = parse_beatmap(data)?;
-
-    Ok(analyze(&beatmap, &data.mods, data.client))
+    Ok(rated_map(data)?.analysis.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::osu::core::{BeatmapStatus, GameState};
 
     const TEST_MAP: &str = "osu file format v14
 
@@ -489,7 +545,70 @@ SliderTickRate:1
             mods_string: String::new(),
         });
 
-        analyze(&beatmap, &mods, OsuClient::Lazer)
+        rate(&beatmap, &mods, OsuClient::Lazer).analysis
+    }
+
+    fn map_on_disk(name: &str) -> BeatmapData {
+        let dir =
+            std::env::temp_dir().join(format!("osu-twitchbot-pp-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("map.osu"), TEST_MAP).unwrap();
+
+        let mut data = BeatmapData {
+            client: OsuClient::Lazer,
+            state: GameState::SongSelect,
+            ruleset: None,
+            id: 0,
+            artist: String::new(),
+            title: String::new(),
+            difficulty_name: String::new(),
+            creator: String::new(),
+            status: BeatmapStatus::NotSubmitted,
+            mods: None,
+            osu_file_path: Some("map.osu".to_string()),
+            songs_folder: dir.to_str().map(str::to_string),
+            file_stamp: None,
+        };
+        data.stamp_file();
+        data
+    }
+
+    #[test]
+    fn a_map_is_rated_once_until_something_changes() {
+        let data = map_on_disk("cache");
+        let rated = rated_map(&data).unwrap();
+
+        let playing = BeatmapData {
+            state: GameState::Playing,
+            ..data.clone()
+        };
+        assert!(Arc::ptr_eq(&rated, &rated_map(&playing).unwrap()));
+
+        let taiko = BeatmapData {
+            ruleset: Some(1),
+            ..data.clone()
+        };
+        assert!(!Arc::ptr_eq(&rated, &rated_map(&taiko).unwrap()));
+
+        let saved = BeatmapData {
+            file_stamp: Some((SystemTime::UNIX_EPOCH, 0)),
+            ..data.clone()
+        };
+        assert!(!Arc::ptr_eq(&rated, &rated_map(&saved).unwrap()));
+    }
+
+    #[test]
+    fn a_stable_map_without_a_stamp_is_not_cached() {
+        let data = BeatmapData {
+            client: OsuClient::Stable,
+            file_stamp: None,
+            ..map_on_disk("unstamped")
+        };
+
+        assert!(!Arc::ptr_eq(
+            &rated_map(&data).unwrap(),
+            &rated_map(&data).unwrap()
+        ));
     }
 
     #[test]
@@ -607,7 +726,7 @@ SliderTickRate:1
         let beatmap = Beatmap::from_bytes(TEST_MAP.as_bytes()).unwrap();
         let args = PpArgs::parse(text);
 
-        score_pp(&beatmap, &args.mods, OsuClient::Lazer, &args)
+        score_pp(&rate(&beatmap, &args.mods, OsuClient::Lazer), &args)
     }
 
     #[test]
@@ -650,8 +769,8 @@ SliderTickRate:1
 
     #[test]
     fn converts_are_rated_in_their_ruleset() {
-        let standard = analyze(&converted(TEST_MAP, None), &None, OsuClient::Lazer);
-        let taiko = analyze(&converted(TEST_MAP, Some(1)), &None, OsuClient::Lazer);
+        let standard = rate(&converted(TEST_MAP, None), &None, OsuClient::Lazer).analysis;
+        let taiko = rate(&converted(TEST_MAP, Some(1)), &None, OsuClient::Lazer).analysis;
 
         assert_ne!(standard.stats.stars, taiko.stats.stars);
         assert_ne!(standard.pp.pp_100, taiko.pp.pp_100);
@@ -667,8 +786,8 @@ SliderTickRate:1
     #[test]
     fn stable_and_lazer_scores_differ() {
         let beatmap = slider_map();
-        let stable = analyze(&beatmap, &None, OsuClient::Stable).pp;
-        let lazer = analyze(&beatmap, &None, OsuClient::Lazer).pp;
+        let stable = rate(&beatmap, &None, OsuClient::Stable).analysis.pp;
+        let lazer = rate(&beatmap, &None, OsuClient::Lazer).analysis.pp;
 
         assert_ne!(stable.pp_100, lazer.pp_100);
         assert_ne!(stable.pp_95, lazer.pp_95);
@@ -677,7 +796,7 @@ SliderTickRate:1
     #[test]
     fn a_dropped_combo_only_costs_pp_on_stable() {
         let beatmap = slider_map();
-        let pp = |client, text| score_pp(&beatmap, &None, client, &PpArgs::parse(text)).pp;
+        let pp = |client, text| score_pp(&rate(&beatmap, &None, client), &PpArgs::parse(text)).pp;
 
         assert!(pp(OsuClient::Stable, "90 4x") < pp(OsuClient::Stable, "90"));
         assert_eq!(pp(OsuClient::Lazer, "90 4x"), pp(OsuClient::Lazer, "90"));
