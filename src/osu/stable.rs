@@ -637,7 +637,7 @@ fn parse_stable_mods(mods: u32) -> Vec<ModInfo> {
         (AP, "AP", 0),
         (RD, "RD", 0),
         (MR, "MR", 0),
-        (V2, "V2", 0),
+        (V2, "SV2", 0),
         (K1, "1K", 0),
         (K2, "2K", 0),
         (K3, "3K", 0),
@@ -666,4 +666,29 @@ fn parse_stable_mods(mods: u32) -> Vec<ModInfo> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use rosu_mods::{Acronym, GameModIntermode};
+
+    use super::*;
+
+    #[test]
+    fn every_stable_mod_is_known_to_the_pp_calculation() {
+        for bit in 0..=30 {
+            for mod_info in parse_stable_mods(1 << bit) {
+                let acronym = mod_info.acronym.parse::<Acronym>().unwrap();
+
+                assert!(
+                    !matches!(
+                        GameModIntermode::from_acronym(acronym),
+                        GameModIntermode::Unknown(_)
+                    ),
+                    "{}",
+                    mod_info.acronym
+                );
+            }
+        }
+    }
 }
