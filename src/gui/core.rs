@@ -26,7 +26,7 @@ use crate::preferences::PreferencesStore;
 use crate::tray::{TrayEvent, TrayStatus};
 use crate::twitch::{
     ChatSettings, DEFAULT_NP_COMMAND, DEFAULT_NP_FORMAT, DEFAULT_PP_COMMAND, DEFAULT_PP_FORMAT,
-    INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
+    DEFAULT_PP_SCORE_FORMAT, INVALID_ACCESS_TOKEN_STATUS, TwitchCommand, TwitchEvent, TwitchStatus,
     is_invalid_access_token_error, is_transient_network_error,
 };
 use crate::{
@@ -63,6 +63,8 @@ pub enum Message {
     PpFormatChanged(String),
     ResetPpCommand,
     ResetPpFormat,
+    PpScoreFormatChanged(String),
+    ResetPpScoreFormat,
     OsuEvent(MemoryEvent),
     TwitchEvent(TwitchEvent),
     LogEvent(LogEntry),
@@ -391,6 +393,49 @@ impl State {
         .into()
     }
 
+    fn reset_button<'a>(&self, on_press: Message) -> Element<'a, Message> {
+        button(text("Reset").size(11))
+            .style(ghost_button)
+            .padding([6, 12])
+            .on_press(on_press)
+            .into()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn format_field<'a>(
+        &'a self,
+        p: &ColorPalette,
+        label: &'static str,
+        value: &'a str,
+        placeholder: &'static str,
+        on_input: fn(String) -> Message,
+        on_reset: Message,
+        help: &'static str,
+        preview: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let input = text_input(placeholder, value)
+            .size(13)
+            .padding([8, 12])
+            .width(Fill)
+            .font(Font::MONOSPACE)
+            .style(primary_text_input)
+            .on_input(on_input);
+
+        column![
+            column![
+                text(label).size(12).color(p.text_secondary),
+                row![input, self.reset_button(on_reset)]
+                    .spacing(10)
+                    .align_y(Center),
+            ]
+            .spacing(5),
+            text(help).size(11).color(p.text_muted).width(Fill),
+            preview,
+        ]
+        .spacing(10)
+        .into()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn command_format_section<'a>(
         &'a self,
@@ -407,14 +452,6 @@ impl State {
         help: &'static str,
         preview: Element<'a, Message>,
     ) -> Element<'a, Message> {
-        let field = |label: &'static str| text(label).size(12).color(p.text_secondary);
-        let reset = |msg: Message| {
-            button(text("Reset").size(11))
-                .style(ghost_button)
-                .padding([6, 12])
-                .on_press(msg)
-        };
-
         let command_input = text_input(command_placeholder, command_value)
             .size(13)
             .padding([8, 12])
@@ -423,32 +460,25 @@ impl State {
             .style(primary_text_input)
             .on_input(on_command);
 
-        let format_input = text_input(format_placeholder, format_value)
-            .size(13)
-            .padding([8, 12])
-            .width(Fill)
-            .font(Font::MONOSPACE)
-            .style(primary_text_input)
-            .on_input(on_format);
-
         column![
             self.section_title(p, title),
             column![
-                field("Command"),
-                row![command_input, reset(on_reset_command)]
+                text("Command").size(12).color(p.text_secondary),
+                row![command_input, self.reset_button(on_reset_command)]
                     .spacing(10)
                     .align_y(Center),
             ]
             .spacing(5),
-            column![
-                field("Format"),
-                row![format_input, reset(on_reset_format)]
-                    .spacing(10)
-                    .align_y(Center),
-            ]
-            .spacing(5),
-            text(help).size(11).color(p.text_muted).width(Fill),
-            preview,
+            self.format_field(
+                p,
+                "Format",
+                format_value,
+                format_placeholder,
+                on_format,
+                on_reset_format,
+                help,
+                preview,
+            ),
         ]
         .spacing(10)
         .into()
@@ -488,9 +518,28 @@ impl State {
             self.build_pp_format_preview(p),
         );
 
-        let commands_content = column![np_section, pp_section]
-            .spacing(24)
-            .padding([22, 24]);
+        let pp_score_format = self.format_field(
+            p,
+            "Format with accuracy, combo or misses",
+            &self.chat.pp_score_format,
+            DEFAULT_PP_SCORE_FORMAT,
+            Message::PpScoreFormatChanged,
+            Message::ResetPpScoreFormat,
+            concat!(
+                "Viewers can add an accuracy, combo, misses and mods, ",
+                "e.g. !pp 98.5 800x 2m +HDDT. Mods alone keep the format above.\n",
+                "Placeholders: {acc} {combo} {misses} {pp} {mods}",
+            ),
+            self.chat_preview(
+                p,
+                Placeholders::sample_pp_score().apply_pp_score(&self.chat.pp_score_format),
+            ),
+        );
+
+        let commands_content =
+            column![np_section, column![pp_section, pp_score_format].spacing(10)]
+                .spacing(24)
+                .padding([22, 24]);
 
         scrollable(container(commands_content).width(Fill))
             .height(Fill)
@@ -983,6 +1032,14 @@ impl State {
             }
             Message::ResetPpFormat => {
                 self.chat.pp_format = DEFAULT_PP_FORMAT.to_string();
+                self.chat_settings_changed();
+            }
+            Message::PpScoreFormatChanged(value) => {
+                self.chat.pp_score_format = value;
+                self.chat_settings_changed();
+            }
+            Message::ResetPpScoreFormat => {
+                self.chat.pp_score_format = DEFAULT_PP_SCORE_FORMAT.to_string();
                 self.chat_settings_changed();
             }
             Message::OsuEvent(event) => match event {

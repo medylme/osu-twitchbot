@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use crate::osu::core::{BeatmapData, MemoryEvent, OsuCommand};
-use crate::osu::pp::analyze_map;
+use crate::osu::pp::{PpArgs, analyze_map, calculate_score_pp};
 use crate::placeholders::Placeholders;
 use crate::{log_debug, log_error, log_info, log_warn};
 
@@ -22,6 +22,7 @@ pub const DEFAULT_NP_FORMAT: &str =
 pub const DEFAULT_PP_COMMAND: &str = "!pp";
 pub const DEFAULT_PP_FORMAT: &str =
     "95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp ({mods})";
+pub const DEFAULT_PP_SCORE_FORMAT: &str = "{acc}% | {combo}x | {misses} miss | {pp}pp ({mods})";
 const SOCKET_KEEPALIVE_SECONDS: u64 = 30;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -77,6 +78,7 @@ pub struct ChatSettings {
     pub np_format: String,
     pub pp_command: String,
     pub pp_format: String,
+    pub pp_score_format: String,
 }
 
 impl Default for ChatSettings {
@@ -86,6 +88,7 @@ impl Default for ChatSettings {
             np_format: DEFAULT_NP_FORMAT.to_string(),
             pp_command: DEFAULT_PP_COMMAND.to_string(),
             pp_format: DEFAULT_PP_FORMAT.to_string(),
+            pp_score_format: DEFAULT_PP_SCORE_FORMAT.to_string(),
         }
     }
 }
@@ -484,21 +487,17 @@ impl TwitchClient {
         settings: &ChatSettings,
         command_type: &CommandType,
         beatmap: &BeatmapData,
+        args: &str,
     ) -> String {
-        let analyze = || {
-            analyze_map(
-                &beatmap.mods,
-                beatmap.osu_file_path.as_deref(),
-                beatmap.songs_folder.as_deref(),
-            )
-        };
+        let path = beatmap.osu_file_path.as_deref();
+        let songs_folder = beatmap.songs_folder.as_deref();
 
         match command_type {
             CommandType::NowPlaying => {
                 let mut placeholders = Placeholders::from_beatmap(beatmap);
 
                 if Placeholders::uses_stats(&settings.np_format) {
-                    let analysis = analyze()
+                    let analysis = analyze_map(&beatmap.mods, path, songs_folder)
                         .inspect_err(|e| log_debug!("twitch", "map stats not available: {}", e))
                         .ok();
                     placeholders = placeholders.with_stats(analysis.as_ref().map(|a| &a.stats));
@@ -506,15 +505,33 @@ impl TwitchClient {
 
                 placeholders.apply_np(&settings.np_format)
             }
-            CommandType::PerformancePoints => match analyze() {
-                Ok(analysis) => Placeholders::from_beatmap(beatmap)
-                    .with_pp(&analysis.pp)
-                    .apply_pp(&settings.pp_format),
-                Err(e) => {
+            CommandType::PerformancePoints => {
+                let args = PpArgs::parse(args);
+                let beatmap = &BeatmapData {
+                    mods: args.mods.clone().or_else(|| beatmap.mods.clone()),
+                    ..beatmap.clone()
+                };
+                let placeholders = Placeholders::from_beatmap(beatmap);
+
+                let reply = if args.is_score() {
+                    calculate_score_pp(&beatmap.mods, path, songs_folder, &args).map(|score| {
+                        placeholders
+                            .with_score(&score)
+                            .apply_pp_score(&settings.pp_score_format)
+                    })
+                } else {
+                    analyze_map(&beatmap.mods, path, songs_folder).map(|analysis| {
+                        placeholders
+                            .with_pp(&analysis.pp)
+                            .apply_pp(&settings.pp_format)
+                    })
+                };
+
+                reply.unwrap_or_else(|e| {
                     log_debug!("twitch", "pp not available: {}", e);
                     "pp calculation currently not available".to_string()
-                }
-            },
+                })
+            }
         }
     }
 
@@ -548,7 +565,8 @@ impl TwitchClient {
                         let np_command = settings.np_command.trim();
                         let pp_command = settings.pp_command.trim();
                         let text = event.message.text.trim();
-                        let first_word = text.split_whitespace().next().unwrap_or("");
+                        let (first_word, args) =
+                            text.split_once(char::is_whitespace).unwrap_or((text, ""));
 
                         let command_type = if !np_command.is_empty()
                             && first_word.eq_ignore_ascii_case(np_command)
@@ -581,7 +599,9 @@ impl TwitchClient {
                             );
 
                             let reply = match latest_beatmap {
-                                Some(beatmap) => Self::build_reply(&settings, &cmd_type, beatmap),
+                                Some(beatmap) => {
+                                    Self::build_reply(&settings, &cmd_type, beatmap, args)
+                                }
                                 None => "No beatmap currently selected".to_string(),
                             };
 
@@ -860,5 +880,97 @@ async fn get_user_id_from_access_token(
     } else {
         log_debug!("twitch", "No user data in response");
         Err("Failed to get user data (empty data array)".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::osu::core::{BeatmapStatus, GameplayMods, ModInfo};
+
+    const MAP: &str = "osu file format v14
+
+[General]
+Mode: 0
+
+[Difficulty]
+HPDrainRate:5
+CircleSize:4
+OverallDifficulty:8
+ApproachRate:9
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[TimingPoints]
+0,500,4,2,0,100,1,0
+
+[HitObjects]
+64,64,0,1,0,0:0:0:0
+192,64,250,1,0,0:0:0:0
+320,64,500,1,0,0:0:0:0
+448,64,750,1,0,0:0:0:0
+";
+
+    fn pp_reply(name: &str, args: &str) -> String {
+        let dir =
+            std::env::temp_dir().join(format!("osu-twitchbot-reply-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("map.osu"), MAP).unwrap();
+
+        let beatmap = BeatmapData {
+            id: 0,
+            artist: "artist".to_string(),
+            title: "title".to_string(),
+            difficulty_name: "diff".to_string(),
+            creator: "creator".to_string(),
+            status: BeatmapStatus::NotSubmitted,
+            mods: Some(GameplayMods {
+                mods: vec![ModInfo {
+                    acronym: "HD".to_string(),
+                    settings: None,
+                }],
+                mods_string: "HD".to_string(),
+            }),
+            osu_file_path: Some("map.osu".to_string()),
+            songs_folder: dir.to_str().map(str::to_string),
+            file_stamp: None,
+        };
+
+        let settings = ChatSettings {
+            pp_format: "spread {pp_100} {mods}".to_string(),
+            pp_score_format: "score {acc}% {combo}x {misses}m {pp} {mods}".to_string(),
+            ..ChatSettings::default()
+        };
+        let reply =
+            TwitchClient::build_reply(&settings, &CommandType::PerformancePoints, &beatmap, args);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+        reply
+    }
+
+    #[test]
+    fn plain_pp_uses_the_selected_mods() {
+        let reply = pp_reply("plain", "");
+
+        assert!(reply.starts_with("spread "), "{reply}");
+        assert!(reply.ends_with(" +HD"), "{reply}");
+    }
+
+    #[test]
+    fn mods_alone_override_the_spread() {
+        let hd = pp_reply("mods-hd", "");
+        let dt = pp_reply("mods-dt", "+DT");
+
+        assert!(dt.starts_with("spread "), "{dt}");
+        assert!(dt.ends_with(" +DT"), "{dt}");
+        assert_ne!(hd, dt);
+    }
+
+    #[test]
+    fn score_arguments_use_the_score_format() {
+        let reply = pp_reply("score", "75 3x 1m +nm");
+
+        assert!(reply.starts_with("score 75% 3x 1m "), "{reply}");
+        assert!(reply.ends_with(" +NoMod"), "{reply}");
     }
 }

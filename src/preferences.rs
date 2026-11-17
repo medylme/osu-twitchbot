@@ -37,6 +37,7 @@ pub struct Config {
     np_format: String,
     pp_command: String,
     pp_format: String,
+    pp_score_format: String,
     telemetry_enabled: bool,
     minimize_to_tray: bool,
 }
@@ -52,6 +53,7 @@ impl Default for Config {
             np_format: chat.np_format,
             pp_command: chat.pp_command,
             pp_format: chat.pp_format,
+            pp_score_format: chat.pp_score_format,
             telemetry_enabled: true,
             minimize_to_tray: true,
         }
@@ -121,6 +123,7 @@ impl PreferencesStore {
             np_format: self.config.np_format.clone(),
             pp_command: self.config.pp_command.clone(),
             pp_format: self.config.pp_format.clone(),
+            pp_score_format: self.config.pp_score_format.clone(),
         }
     }
 
@@ -139,6 +142,9 @@ impl PreferencesStore {
         self.config.np_format.clone_from(&chat.np_format);
         self.config.pp_command.clone_from(&chat.pp_command);
         self.config.pp_format.clone_from(&chat.pp_format);
+        self.config
+            .pp_score_format
+            .clone_from(&chat.pp_score_format);
         self.save()
     }
 }

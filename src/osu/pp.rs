@@ -7,7 +7,7 @@ use rosu_pp::{Beatmap, Difficulty, Performance};
 use serde::de::DeserializeSeed;
 use thiserror::Error;
 
-use super::core::GameplayMods;
+use super::core::{GameplayMods, ModInfo, order_mods};
 use crate::log_warn;
 
 #[derive(Debug, Error)]
@@ -56,11 +56,102 @@ impl MapStats {
         format!("{}:{:02}", secs / 60, secs % 60)
     }
 
-    // one decimal, without a trailing .0
     pub fn setting_text(value: f64) -> String {
-        let text = format!("{value:.1}");
-        text.strip_suffix(".0").map(str::to_string).unwrap_or(text)
+        decimal_text(value, 1)
     }
+}
+
+// fixed decimals without trailing zeros
+pub fn decimal_text(value: f64, places: usize) -> String {
+    let text = format!("{value:.places$}");
+    if !text.contains('.') {
+        return text;
+    }
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PpArgs {
+    pub accuracy: Option<f64>,
+    pub combo: Option<u32>,
+    pub misses: Option<u32>,
+    pub mods: Option<GameplayMods>,
+}
+
+impl PpArgs {
+    pub fn parse(text: &str) -> Self {
+        let mut args = Self::default();
+
+        for token in text.split_whitespace() {
+            let token = token.to_ascii_lowercase();
+
+            if let Some(mods) = token.strip_prefix('+') {
+                args.mods = parse_mods(mods).or(args.mods);
+            } else if let Some(misses) = ["misses", "miss", "m"]
+                .iter()
+                .find_map(|suffix| token.strip_suffix(suffix))
+            {
+                args.misses = misses.parse().ok().or(args.misses);
+            } else if let Some(combo) = token.strip_suffix('x') {
+                args.combo = combo.parse().ok().or(args.combo);
+            } else {
+                let accuracy = token.strip_suffix('%').unwrap_or(&token).replace(',', ".");
+                args.accuracy = accuracy
+                    .parse()
+                    .ok()
+                    .filter(|accuracy| (0.0..=100.0).contains(accuracy))
+                    .or(args.accuracy);
+            }
+        }
+
+        args
+    }
+
+    pub fn is_score(&self) -> bool {
+        self.accuracy.is_some() || self.combo.is_some() || self.misses.is_some()
+    }
+}
+
+fn parse_mods(text: &str) -> Option<GameplayMods> {
+    let text = text.to_ascii_uppercase();
+    let mut mods: Vec<ModInfo> = Vec::new();
+
+    if !matches!(text.as_str(), "NM" | "NOMOD") {
+        if text.is_empty() || !text.is_ascii() || !text.len().is_multiple_of(2) {
+            return None;
+        }
+
+        for acronym in text.as_bytes().chunks(2) {
+            let acronym = std::str::from_utf8(acronym).ok()?;
+            let known = acronym.parse::<Acronym>().is_ok_and(|acronym| {
+                !matches!(
+                    GameModIntermode::from_acronym(acronym),
+                    GameModIntermode::Unknown(_)
+                )
+            });
+            if !known {
+                return None;
+            }
+
+            if !mods.iter().any(|m| m.acronym == acronym) {
+                mods.push(ModInfo {
+                    acronym: acronym.to_string(),
+                    settings: None,
+                });
+            }
+        }
+    }
+
+    let mods_string = order_mods(&mut mods);
+    Some(GameplayMods { mods, mods_string })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScorePp {
+    pub pp: f64,
+    pub accuracy: f64,
+    pub combo: u32,
+    pub misses: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -155,7 +246,7 @@ fn game_mode(beatmap: &Beatmap) -> GameMode {
     }
 }
 
-// slider end times are not stored, so derive the last one from its length and velocity
+// slider end times are not stored, so derive the last one
 fn last_object_end(beatmap: &Beatmap) -> Option<f64> {
     let last = beatmap.hit_objects.last()?;
     let start = last.start_time;
@@ -237,20 +328,68 @@ fn analyze(beatmap: &Beatmap, mods: &Option<GameplayMods>) -> MapAnalysis {
     }
 }
 
+fn score_pp(beatmap: &Beatmap, mods: &Option<GameplayMods>, args: &PpArgs) -> ScorePp {
+    let difficulty = Difficulty::new().mods(build_mods(mods, game_mode(beatmap)));
+    let attributes = difficulty.calculate(beatmap);
+
+    let max_combo = attributes.max_combo();
+    let objects = u32::try_from(beatmap.hit_objects.len()).unwrap_or(u32::MAX);
+    let misses = args.misses.unwrap_or(0).min(objects);
+    let combo = args.combo.unwrap_or(max_combo).min(max_combo);
+
+    // without an acc value, assume all 300s
+    let accuracy = args.accuracy.unwrap_or_else(|| {
+        if objects == 0 {
+            100.0
+        } else {
+            100.0 * f64::from(objects - misses) / f64::from(objects)
+        }
+    });
+
+    let pp = Performance::new(attributes)
+        .difficulty(difficulty)
+        .accuracy(accuracy)
+        .combo(combo)
+        .misses(misses)
+        .calculate()
+        .pp();
+
+    ScorePp {
+        pp,
+        accuracy,
+        combo,
+        misses,
+    }
+}
+
+fn parse_beatmap(local_path: Option<&str>, songs_folder: Option<&str>) -> Result<Beatmap, PpError> {
+    let osu_file = load_beatmap(local_path, songs_folder)?;
+    Beatmap::from_bytes(&osu_file).map_err(|e| PpError::Parse(e.to_string()))
+}
+
+pub fn calculate_score_pp(
+    mods: &Option<GameplayMods>,
+    local_path: Option<&str>,
+    songs_folder: Option<&str>,
+    args: &PpArgs,
+) -> Result<ScorePp, PpError> {
+    let beatmap = parse_beatmap(local_path, songs_folder)?;
+
+    Ok(score_pp(&beatmap, mods, args))
+}
+
 pub fn analyze_map(
     mods: &Option<GameplayMods>,
     local_path: Option<&str>,
     songs_folder: Option<&str>,
 ) -> Result<MapAnalysis, PpError> {
-    let osu_file = load_beatmap(local_path, songs_folder)?;
-    let beatmap = Beatmap::from_bytes(&osu_file).map_err(|e| PpError::Parse(e.to_string()))?;
+    let beatmap = parse_beatmap(local_path, songs_folder)?;
 
     Ok(analyze(&beatmap, mods))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::core::ModInfo;
     use super::*;
 
     const TEST_MAP: &str = "osu file format v14
@@ -376,6 +515,102 @@ SliderTickRate:1
         let analysis = analyze_with(TEST_MAP, &["HD", "DT"]);
 
         assert_eq!(analysis.pp.pp_100, pp_with(&["HD", "DT"]));
+    }
+
+    fn acronyms(args: &PpArgs) -> Vec<&str> {
+        args.mods
+            .as_ref()
+            .unwrap()
+            .mods
+            .iter()
+            .map(|m| m.acronym.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn args_parse_in_any_order() {
+        let args = PpArgs::parse("+hddt 2m 98.5% 800x");
+
+        assert_eq!(args.accuracy, Some(98.5));
+        assert_eq!(args.combo, Some(800));
+        assert_eq!(args.misses, Some(2));
+        assert_eq!(acronyms(&args), ["HD", "DT"]);
+        assert_eq!(args.mods.unwrap().mods_string, "HDDT");
+        assert!(PpArgs::parse("97").is_score());
+    }
+
+    #[test]
+    fn args_accept_common_spellings() {
+        assert_eq!(PpArgs::parse("98,5").accuracy, Some(98.5));
+        assert_eq!(PpArgs::parse("3miss").misses, Some(3));
+        assert_eq!(PpArgs::parse("3MISSES").misses, Some(3));
+        assert_eq!(PpArgs::parse("1200X").combo, Some(1200));
+    }
+
+    #[test]
+    fn mods_alone_keep_the_spread() {
+        let args = PpArgs::parse("+HR");
+
+        assert!(!args.is_score());
+        assert_eq!(acronyms(&args), ["HR"]);
+    }
+
+    #[test]
+    fn nomod_overrides_with_no_mods() {
+        let mods = PpArgs::parse("+NM").mods.unwrap();
+
+        assert!(mods.mods.is_empty());
+        assert_eq!(mods.mods_string, "NoMod");
+    }
+
+    #[test]
+    fn invalid_args_are_ignored() {
+        assert_eq!(
+            PpArgs::parse("please 150 -3 x m +ZZ +HDD"),
+            PpArgs::default()
+        );
+        assert_eq!(PpArgs::parse("").accuracy, None);
+    }
+
+    fn score_with(text: &str) -> ScorePp {
+        let beatmap = Beatmap::from_bytes(TEST_MAP.as_bytes()).unwrap();
+        let args = PpArgs::parse(text);
+
+        score_pp(&beatmap, &args.mods, &args)
+    }
+
+    #[test]
+    fn score_pp_follows_the_arguments() {
+        let full = score_with("100");
+
+        assert_eq!(full.pp, pp_with(&[]));
+        assert_eq!((full.combo, full.misses), (8, 0));
+        assert!(score_with("95").pp < full.pp);
+        assert!(score_with("100 1m").pp < full.pp);
+        assert!(score_with("100 +DT").pp > full.pp);
+    }
+
+    #[test]
+    fn score_pp_clamps_to_the_map() {
+        let score = score_with("100 9999x 9999m");
+
+        assert_eq!((score.combo, score.misses), (8, 8));
+    }
+
+    #[test]
+    fn misses_without_accuracy_lower_the_accuracy() {
+        let score = score_with("2m");
+
+        assert_eq!(score.accuracy, 75.0);
+        assert!(score.pp < score_with("100").pp);
+    }
+
+    #[test]
+    fn decimals_are_trimmed() {
+        assert_eq!(decimal_text(98.5, 2), "98.5");
+        assert_eq!(decimal_text(100.0, 2), "100");
+        assert_eq!(decimal_text(99.256, 2), "99.26");
+        assert_eq!(decimal_text(120.0, 0), "120");
     }
 
     #[test]

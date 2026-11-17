@@ -82,6 +82,31 @@ Default:
 95%: {pp_95}pp | 97%: {pp_97}pp | 98%: {pp_98}pp | 99%: {pp_99}pp | 100%: {pp_100}pp {mods}
 ```
 
+Viewers can add arguments after the command, in any order:
+
+| Argument  | Example | Description                                  |
+| --------- | ------- | -------------------------------------------- |
+| Accuracy  | `98.5`  | PP for that accuracy                         |
+| Combo     | `800x`  | Max combo of the score                       |
+| Misses    | `2m`    | Number of misses                             |
+| Mods      | `+HDDT` | Use these mods instead of the selected ones (`+NM` for none) |
+
+Mods alone (`!pp +HDDT`) keep the format above. With an accuracy, combo or misses (`!pp 98.5 800x 2m +HDDT`) the reply uses its own format:
+
+| Placeholder | Description |
+| ----------- | ----------- |
+| `{acc}`     | Accuracy    |
+| `{combo}`   | Combo       |
+| `{misses}`  | Misses      |
+| `{pp}`      | PP          |
+| `{mods}`    | Mods        |
+
+Default:
+
+```
+{acc}% | {combo}x | {misses} miss | {pp}pp ({mods})
+```
+
 ## File Locations
 
 Settings are stored as `settings.toml`; logs are written to a `latest.log` (truncated each run) alongside timestamped archives. The Console tab has **Open Logs Folder** and **Open Config Folder** buttons.

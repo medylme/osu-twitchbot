@@ -1,5 +1,5 @@
 use crate::osu::core::BeatmapData;
-use crate::osu::pp::{MapStats, PpValues};
+use crate::osu::pp::{MapStats, PpValues, ScorePp, decimal_text};
 
 const STAT_PLACEHOLDERS: [&str; 9] = [
     "{stars}",
@@ -41,6 +41,11 @@ pub struct Placeholders {
     pub pp_98: Option<String>,
     pub pp_99: Option<String>,
     pub pp_100: Option<String>,
+
+    pub acc: Option<String>,
+    pub combo: Option<String>,
+    pub misses: Option<String>,
+    pub pp: Option<String>,
 }
 
 impl Placeholders {
@@ -100,6 +105,14 @@ impl Placeholders {
         self
     }
 
+    pub fn with_score(mut self, score: &ScorePp) -> Self {
+        self.acc = Some(decimal_text(score.accuracy, 2));
+        self.combo = Some(score.combo.to_string());
+        self.misses = Some(score.misses.to_string());
+        self.pp = Some(format!("{:.0}", score.pp));
+        self
+    }
+
     fn sample_stats() -> MapStats {
         MapStats {
             stars: 5.67,
@@ -141,10 +154,33 @@ impl Placeholders {
         }
     }
 
+    pub fn sample_pp_score() -> Self {
+        Self {
+            mods: Some("+HDDT".to_string()),
+            ..Default::default()
+        }
+        .with_score(&ScorePp {
+            pp: 312.0,
+            accuracy: 98.5,
+            combo: 800,
+            misses: 2,
+        })
+    }
+
     fn replace(result: &mut String, placeholder: &str, value: &Option<String>) {
         if let Some(v) = value {
             *result = result.replace(placeholder, v);
         }
+    }
+
+    pub fn apply_pp_score(&self, format: &str) -> String {
+        let mut result = format.to_string();
+        Self::replace(&mut result, "{mods}", &self.mods);
+        Self::replace(&mut result, "{acc}", &self.acc);
+        Self::replace(&mut result, "{combo}", &self.combo);
+        Self::replace(&mut result, "{misses}", &self.misses);
+        Self::replace(&mut result, "{pp}", &self.pp);
+        Self::trim(result)
     }
 
     fn replace_stats(&self, result: &mut String) {
@@ -241,6 +277,16 @@ mod tests {
         let placeholders = Placeholders::default().with_stats(None);
 
         assert_eq!(placeholders.apply_np("{stars}* {bpm}bpm"), "?* ?bpm");
+    }
+
+    #[test]
+    fn score_fills_the_pp_score_format() {
+        let placeholders = Placeholders::sample_pp_score();
+
+        assert_eq!(
+            placeholders.apply_pp_score("{acc}% {combo}x {misses} miss: {pp}pp ({mods})"),
+            "98.5% 800x 2 miss: 312pp (+HDDT)"
+        );
     }
 
     #[test]
